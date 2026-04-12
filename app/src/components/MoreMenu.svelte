@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Settings, ListChecks, Contact, Megaphone, BookOpen, Users, Plane, Link2, Network, Quote } from 'lucide-svelte';
+  import { Settings, ListChecks, Contact, Megaphone, BookOpen, Users, Plane, Link2, Network, Quote, Wallet } from 'lucide-svelte';
 
   let open = $state(false);
   let ref: HTMLDivElement;
@@ -29,6 +29,7 @@
   const items = [
     { href: '/chart',          label: 'Org Chart',             icon: Network },
     { href: '/my-tasks',       label: 'My Tasks',              icon: ListChecks },
+    { href: '/expenses',       label: 'Expenses',              icon: Wallet },
     { href: '/directory',      label: 'Directory',             icon: Contact },
     { href: '/updates',        label: 'Updates',               icon: Megaphone },
     { href: '/testimonials',   label: 'Testimonials',          icon: Quote },

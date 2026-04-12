@@ -1,0 +1,203 @@
+---
+import AppLayout from '~/layouts/AppLayout.astro';
+import { CreditCard, ArrowLeft, Plus, Pencil, X, Trash2 } from 'lucide-svelte';
+import { supabase } from '~/lib/supabase';
+
+const url = Astro.url;
+const editId = url.searchParams.get('edit');
+const adding = url.searchParams.get('new') === '1';
+
+const [{ data: methods }, { data: employees }] = await Promise.all([
+  supabase
+    .from('expense_methods')
+    .select('id, name, label, employee_id, notes, employee:employees(id, full_name, email)')
+    .order('name'),
+  supabase.from('employees').select('id, full_name').order('full_name'),
+]);
+
+// Also fetch how many charges hit each method in all time, to show counts
+const { data: allExpenses } = await supabase
+  .from('expenses')
+  .select('method, amount');
+
+const stats = new Map<string, { count: number; total: number }>();
+for (const e of (allExpenses ?? []) as { method: string; amount: string | number }[]) {
+  if (!stats.has(e.method)) stats.set(e.method, { count: 0, total: 0 });
+  const s = stats.get(e.method)!;
+  s.count += 1;
+  s.total += Number(e.amount) || 0;
+}
+
+type Method = {
+  id: string;
+  name: string;
+  label: string | null;
+  employee_id: string | null;
+  notes: string | null;
+  employee: { id: string; full_name: string; email: string } | { id: string; full_name: string; email: string }[] | null;
+};
+
+const normalize = (m: any): Method & { employee: { id: string; full_name: string; email: string } | null } => ({
+  ...m,
+  employee: Array.isArray(m.employee) ? m.employee[0] ?? null : m.employee ?? null,
+});
+
+const list = (methods ?? []).map(normalize);
+const editing = editId ? list.find((m) => m.id === editId) ?? null : null;
+
+const fmtMoney = (n: number) =>
+  '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const initials = (name: string) =>
+  name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
+
+const back = '/expenses/methods';
+---
+<AppLayout title="Payment methods · GYE EOS">
+  <a href="/expenses" class="inline-flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-900 mb-6">
+    <ArrowLeft size={16} /> Back to Expenses
+  </a>
+
+  <header class="flex items-start justify-between mb-8">
+    <div class="flex items-center gap-3">
+      <div class="w-12 h-12 rounded-xl bg-sky-100 grid place-items-center">
+        <CreditCard class="text-sky-600" size={24} />
+      </div>
+      <div>
+        <h1 class="text-2xl font-semibold text-stone-900">Payment methods</h1>
+        <p class="text-stone-500 text-sm">Label each card/account and assign an owner</p>
+      </div>
+    </div>
+    <a
+      href="/expenses/methods?new=1"
+      class="bg-sky-600 hover:bg-sky-700 text-white rounded-xl px-5 py-2.5 text-sm font-medium flex items-center gap-1.5"
+    >
+      <Plus size={16} />
+      New method
+    </a>
+  </header>
+
+  <div class="bg-white border border-stone-200 rounded-2xl overflow-hidden">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-[11px] uppercase tracking-wider text-stone-500 bg-stone-50">
+          <th class="text-left font-medium px-5 py-3 w-32">Method</th>
+          <th class="text-left font-medium px-3 py-3">Label</th>
+          <th class="text-left font-medium px-3 py-3">Owner</th>
+          <th class="text-right font-medium px-3 py-3 w-16">#</th>
+          <th class="text-right font-medium px-3 py-3 w-32">All-time</th>
+          <th class="text-right font-medium px-5 py-3 w-16"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {list.length === 0 && (
+          <tr>
+            <td colspan="6" class="px-5 py-10 text-center text-sm text-stone-400">
+              No methods yet.
+            </td>
+          </tr>
+        )}
+        {list.map((m) => {
+          const s = stats.get(m.name);
+          return (
+            <tr class="border-t border-stone-100 hover:bg-stone-50/60">
+              <td class="px-5 py-3 font-mono text-sm text-stone-800">{m.name}</td>
+              <td class="px-3 py-3 text-stone-700">{m.label || <span class="text-stone-300">—</span>}</td>
+              <td class="px-3 py-3">
+                {m.employee ? (
+                  <div class="flex items-center gap-2">
+                    <div class="w-7 h-7 rounded-full bg-violet-100 text-violet-700 grid place-items-center text-[10px] font-semibold">
+                      {initials(m.employee.full_name)}
+                    </div>
+                    <span class="text-stone-700">{m.employee.full_name}</span>
+                  </div>
+                ) : (
+                  <span class="text-stone-300">—</span>
+                )}
+              </td>
+              <td class="px-3 py-3 text-right text-stone-500 tabular-nums">{s?.count ?? 0}</td>
+              <td class="px-3 py-3 text-right font-medium text-stone-900 tabular-nums">
+                {fmtMoney(s?.total ?? 0)}
+              </td>
+              <td class="px-5 py-3 text-right">
+                <a href={`/expenses/methods?edit=${m.id}`} class="p-1.5 rounded text-stone-400 hover:text-stone-800 hover:bg-stone-100 inline-block">
+                  <Pencil size={14} />
+                </a>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  </div>
+
+  {(editing || adding) && (
+    <div class="fixed inset-0 z-30">
+      <a href={back} class="absolute inset-0 bg-black/30"></a>
+      <aside class="absolute right-0 top-0 bottom-0 w-full max-w-md bg-white shadow-2xl overflow-y-auto">
+        <div class="p-6 space-y-5">
+          <div class="flex items-center justify-between">
+            <h2 class="text-xl font-semibold text-stone-900">{editing ? 'Edit method' : 'New method'}</h2>
+            <a href={back} class="p-1 text-stone-400 hover:text-stone-700"><X size={20} /></a>
+          </div>
+
+          <form method="POST" action="/api/expense-methods" class="space-y-4">
+            <input type="hidden" name="_action" value={editing ? 'update' : 'create'} />
+            {editing && <input type="hidden" name="id" value={editing.id} />}
+            <input type="hidden" name="back" value={back} />
+
+            <div>
+              <label class="text-sm font-medium text-stone-700">Method (name in expenses.method)</label>
+              <input type="text" name="name" required value={editing?.name ?? ''}
+                placeholder="e.g. 1018, PayPal, Amex-5555"
+                class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400" />
+            </div>
+
+            <div>
+              <label class="text-sm font-medium text-stone-700">Label (display name)</label>
+              <input type="text" name="label" value={editing?.label ?? ''}
+                placeholder="e.g. Chase Sapphire ·1018"
+                class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400" />
+            </div>
+
+            <div>
+              <label class="text-sm font-medium text-stone-700">Owner</label>
+              <select name="employee_id" class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm">
+                <option value="">— none —</option>
+                {employees?.map((e) => (
+                  <option value={e.id} selected={e.id === editing?.employee_id}>{e.full_name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label class="text-sm font-medium text-stone-700">Notes</label>
+              <textarea name="notes" rows="3"
+                class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400"
+              >{editing?.notes ?? ''}</textarea>
+            </div>
+
+            <button class="w-full bg-sky-600 hover:bg-sky-700 text-white rounded-lg py-2.5 text-sm font-medium">
+              {editing ? 'Save changes' : 'Create method'}
+            </button>
+          </form>
+
+          {editing && (
+            <form
+              method="POST"
+              action="/api/expense-methods"
+              class="pt-4 border-t border-stone-200"
+              onsubmit="return confirm('Delete this method?');"
+            >
+              <input type="hidden" name="_action" value="delete" />
+              <input type="hidden" name="id" value={editing.id} />
+              <input type="hidden" name="back" value={back} />
+              <button class="w-full border border-rose-300 text-rose-700 rounded-lg py-2 text-sm font-medium flex items-center justify-center gap-2">
+                <Trash2 size={14} /> Delete method
+              </button>
+            </form>
+          )}
+        </div>
+      </aside>
+    </div>
+  )}
+</AppLayout>

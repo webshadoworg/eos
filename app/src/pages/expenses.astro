@@ -1,0 +1,120 @@
+---
+import AppLayout from '~/layouts/AppLayout.astro';
+import { Wallet, Calendar, ChevronRight, CreditCard, X } from 'lucide-svelte';
+import { supabase } from '~/lib/supabase';
+import { resolveMethodFilter } from '~/lib/expense-method';
+
+const methodFilter = resolveMethodFilter(Astro.url, Astro.cookies);
+
+let expQuery = supabase.from('expenses').select('month, amount, method');
+if (methodFilter) expQuery = expQuery.eq('method', methodFilter);
+const { data: expenses } = await expQuery;
+
+// Pull methods so we can show the filter chip with label + owner info
+const { data: methods } = await supabase
+  .from('expense_methods')
+  .select('name, label, employee:employees(id, full_name)');
+
+const methodByName = new Map<string, { label: string | null; ownerName: string | null }>();
+for (const m of (methods ?? []) as any[]) {
+  const employee = Array.isArray(m.employee) ? m.employee[0] : m.employee;
+  methodByName.set(m.name, {
+    label: m.label,
+    ownerName: employee?.full_name ?? null,
+  });
+}
+const activeMethodMeta = methodFilter ? methodByName.get(methodFilter) : null;
+
+type Row = { month: string; amount: string | number };
+const groupsByMonth = new Map<string, { month: string; label: string; total: number; count: number }>();
+for (const e of (expenses ?? []) as Row[]) {
+  const m = e.month;
+  if (!groupsByMonth.has(m)) {
+    const [yyyy, mm] = m.split('-').map(Number);
+    const label = new Date(Date.UTC(yyyy, (mm ?? 1) - 1, 1)).toLocaleDateString('en-US', {
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
+    groupsByMonth.set(m, { month: m, label, total: 0, count: 0 });
+  }
+  const g = groupsByMonth.get(m)!;
+  g.total += Number(e.amount) || 0;
+  g.count += 1;
+}
+const groups = Array.from(groupsByMonth.values()).sort((a, b) => b.month.localeCompare(a.month));
+
+const fmtMoney = (n: number) =>
+  '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+---
+<AppLayout title="Expenses · GYE EOS">
+  <header class="flex items-start justify-between mb-6">
+    <div class="flex items-center gap-3">
+      <div class="w-12 h-12 rounded-xl bg-emerald-100 grid place-items-center">
+        <Wallet class="text-emerald-600" size={24} />
+      </div>
+      <div>
+        <h1 class="text-2xl font-semibold text-stone-900">Expenses</h1>
+        <p class="text-stone-500 text-sm">Monthly spend reports</p>
+      </div>
+    </div>
+    <a
+      href="/expenses/methods"
+      class="border border-stone-300 bg-white rounded-xl px-4 py-2.5 text-sm font-medium flex items-center gap-1.5 text-stone-700 hover:bg-stone-50"
+    >
+      <CreditCard size={16} />
+      Methods
+    </a>
+  </header>
+
+  {methodFilter && (
+    <div class="mb-6 bg-sky-50 border border-sky-200 rounded-xl px-4 py-3 flex items-center gap-3">
+      <CreditCard size={16} class="text-sky-600" />
+      <div class="flex-1 text-sm text-sky-900">
+        Filtering by <span class="font-mono font-semibold">{methodFilter}</span>
+        {activeMethodMeta?.label && <> · {activeMethodMeta.label}</>}
+        {activeMethodMeta?.ownerName && <> · owned by <span class="font-medium">{activeMethodMeta.ownerName}</span></>}
+      </div>
+      <a
+        href="/expenses?method=all"
+        class="inline-flex items-center gap-1 text-xs text-sky-700 hover:text-sky-900 font-medium"
+      >
+        <X size={13} /> Clear
+      </a>
+    </div>
+  )}
+
+  {groups.length === 0 ? (
+    <div class="bg-white border border-stone-200 rounded-2xl px-4 py-12 text-center text-sm text-stone-400">
+      {methodFilter ? 'No expenses for this method yet.' : 'No expenses yet.'}
+    </div>
+  ) : (
+    <div class="grid gap-3">
+      {groups.map((g) => (
+        <a
+          href={`/expenses/${g.month}`}
+          class="group bg-white border border-stone-200 rounded-2xl px-6 py-5 flex items-center justify-between hover:border-emerald-300 hover:shadow-sm transition"
+        >
+          <div class="flex items-center gap-4">
+            <div class="w-10 h-10 rounded-lg bg-emerald-50 text-emerald-700 grid place-items-center">
+              <Calendar size={18} />
+            </div>
+            <div>
+              <div class="text-lg font-semibold text-stone-900 group-hover:text-emerald-700 transition">
+                {g.label}
+              </div>
+              <div class="text-xs text-stone-500">{g.count} {g.count === 1 ? 'charge' : 'charges'}</div>
+            </div>
+          </div>
+          <div class="flex items-center gap-4">
+            <div class="text-right">
+              <div class="text-xs text-stone-400 uppercase tracking-wide">Total</div>
+              <div class="text-2xl font-semibold text-stone-900 tabular-nums">{fmtMoney(g.total)}</div>
+            </div>
+            <ChevronRight size={18} class="text-stone-300 group-hover:text-emerald-600 transition" />
+          </div>
+        </a>
+      ))}
+    </div>
+  )}
+</AppLayout>

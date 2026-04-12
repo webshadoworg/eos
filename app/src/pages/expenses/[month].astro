@@ -1,0 +1,440 @@
+---
+import AppLayout from '~/layouts/AppLayout.astro';
+import ExpenseStatusPicker from '~/components/ExpenseStatusPicker.svelte';
+import { Wallet, ArrowLeft, Calendar, TrendingUp, CreditCard, X, Check, CircleHelp, Circle, ArrowRightLeft } from 'lucide-svelte';
+import { supabase } from '~/lib/supabase';
+import { resolveMethodFilter } from '~/lib/expense-method';
+
+const { month } = Astro.params;
+if (!month || !/^\d{4}-\d{2}$/.test(month)) return new Response('Invalid month', { status: 400 });
+
+const methodFilter = resolveMethodFilter(Astro.url, Astro.cookies);
+const statusFilter = Astro.url.searchParams.get('status') ?? 'all';
+
+// Counts for the filter chips — unaffected by the current status filter so
+// the numbers stay stable as you click through.
+let countsQuery = supabase
+  .from('expenses')
+  .select('status, amount')
+  .eq('month', month);
+if (methodFilter) countsQuery = countsQuery.eq('method', methodFilter);
+const { data: countsData } = await countsQuery;
+const statusCounts = {
+  all:       (countsData ?? []).length,
+  none:      (countsData ?? []).filter((r: any) => r.status === 'none').length,
+  good:      (countsData ?? []).filter((r: any) => r.status === 'good').length,
+  to_review: (countsData ?? []).filter((r: any) => r.status === 'to_review').length,
+  to_move:   (countsData ?? []).filter((r: any) => r.status === 'to_move').length,
+  cancelled: (countsData ?? []).filter((r: any) => r.status === 'cancelled').length,
+};
+
+let expQuery = supabase
+  .from('expenses')
+  .select('expense_id, month, date, method, vendor, amount, status, move_to_method')
+  .eq('month', month)
+  .order('date', { ascending: false })
+  .order('expense_id', { ascending: false });
+if (methodFilter) expQuery = expQuery.eq('method', methodFilter);
+if (statusFilter !== 'all') expQuery = expQuery.eq('status', statusFilter);
+
+const [{ data: expenses }, { data: vendors }, { data: methods }] = await Promise.all([
+  expQuery,
+  supabase
+    .from('expenses_vendors')
+    .select('vendor_id, name, person, description, frequency, status, group_name, aliases, report_matches'),
+  supabase
+    .from('expense_methods')
+    .select('name, label, notes, employee:employees(id, full_name)'),
+]);
+
+if (!expenses) {
+  return new Response(`No expenses for ${month}`, { status: 404 });
+}
+
+type Expense = {
+  expense_id: number;
+  month: string;
+  date: string;
+  method: string;
+  vendor: string;
+  amount: string | number;
+  status: 'none' | 'good' | 'to_review' | 'cancelled' | 'to_move';
+  move_to_method: string | null;
+};
+type Vendor = {
+  vendor_id: number;
+  name: string;
+  person: string | null;
+  description: string | null;
+  frequency: string | null;
+  status: string | null;
+  group_name: string | null;
+  aliases: string[] | null;
+  report_matches: string[] | null;
+};
+
+// Build a case-insensitive lookup: every name + alias + report_match → canonical vendor
+const vendorByKey = new Map<string, Vendor>();
+for (const v of (vendors ?? []) as Vendor[]) {
+  const keys = new Set<string>();
+  if (v.name) keys.add(v.name.trim().toLowerCase());
+  for (const a of v.aliases ?? []) if (a) keys.add(a.trim().toLowerCase());
+  for (const r of v.report_matches ?? []) if (r) keys.add(r.trim().toLowerCase());
+  for (const k of keys) if (!vendorByKey.has(k)) vendorByKey.set(k, v);
+}
+function matchVendor(raw: string): Vendor | null {
+  if (!raw) return null;
+  return vendorByKey.get(raw.trim().toLowerCase()) ?? null;
+}
+
+// Method enrichment lookup
+type MethodMeta = { name: string; label: string | null; notes: string | null; ownerName: string | null };
+const methodByName = new Map<string, MethodMeta>();
+for (const m of (methods ?? []) as any[]) {
+  const employee = Array.isArray(m.employee) ? m.employee[0] : m.employee;
+  methodByName.set(m.name, {
+    name: m.name,
+    label: m.label,
+    notes: m.notes,
+    ownerName: employee?.full_name ?? null,
+  });
+}
+const activeMethodMeta = methodFilter ? methodByName.get(methodFilter) ?? null : null;
+
+// Plain list for the status-picker's move dropdown
+const methodsForPicker = Array.from(methodByName.values()).map((m) => ({
+  name: m.name,
+  label: m.label,
+  ownerName: m.ownerName,
+}));
+
+// Enrich each expense with its matched vendor, compute per-vendor aggregates
+type EnrichedExpense = Expense & { matched: Vendor | null; canonical: string };
+const enriched: EnrichedExpense[] = (expenses as Expense[]).map((e) => {
+  const m = matchVendor(e.vendor);
+  return { ...e, matched: m, canonical: m?.name ?? e.vendor };
+});
+
+const total = enriched.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+const count = enriched.length;
+
+// Per-canonical-vendor rollup
+type VendorRollup = {
+  canonical: string;
+  matched: Vendor | null;
+  count: number;
+  total: number;
+  ids: number[];
+  statuses: Set<string>;
+};
+const byVendor = new Map<string, VendorRollup>();
+for (const e of enriched) {
+  const key = e.canonical.toLowerCase();
+  if (!byVendor.has(key)) {
+    byVendor.set(key, {
+      canonical: e.canonical,
+      matched: e.matched,
+      count: 0,
+      total: 0,
+      ids: [],
+      statuses: new Set(),
+    });
+  }
+  const r = byVendor.get(key)!;
+  r.count += 1;
+  r.total += Number(e.amount) || 0;
+  r.ids.push(e.expense_id);
+  r.statuses.add(e.status ?? 'none');
+}
+const vendorRollup = Array.from(byVendor.values()).sort((a, b) => b.total - a.total);
+// Resolve dominant status per row: single status → that value, mixed → 'mixed'
+function rollupStatus(r: VendorRollup): string {
+  if (r.statuses.size === 1) return Array.from(r.statuses)[0];
+  return 'mixed';
+}
+
+// Per-method rollup
+const byMethod = new Map<string, { method: string; count: number; total: number }>();
+for (const e of enriched) {
+  if (!byMethod.has(e.method)) byMethod.set(e.method, { method: e.method, count: 0, total: 0 });
+  const r = byMethod.get(e.method)!;
+  r.count += 1;
+  r.total += Number(e.amount) || 0;
+}
+const methodRollup = Array.from(byMethod.values()).sort((a, b) => b.total - a.total);
+
+// Unmatched raw strings for the amber warning section
+const unmatchedSet = new Map<string, number>();
+for (const e of enriched) {
+  if (!e.matched) unmatchedSet.set(e.vendor, (unmatchedSet.get(e.vendor) ?? 0) + Number(e.amount));
+}
+
+const [yyyy, mm] = month.split('-').map(Number);
+const label = new Date(Date.UTC(yyyy, (mm ?? 1) - 1, 1)).toLocaleDateString('en-US', {
+  month: 'long',
+  year: 'numeric',
+  timeZone: 'UTC',
+});
+
+const fmtMoney = (n: number) =>
+  '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtDate = (d: string) =>
+  new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+const pct = (n: number) => ((n / total) * 100).toFixed(1) + '%';
+---
+<AppLayout title={`${label} Expenses · GYE EOS`}>
+  <a href="/expenses" class="inline-flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-900 mb-6">
+    <ArrowLeft size={16} /> Back to Expenses
+  </a>
+
+  <header class="flex items-start justify-between mb-6">
+    <div class="flex items-center gap-3">
+      <div class="w-12 h-12 rounded-xl bg-emerald-100 grid place-items-center">
+        <Wallet class="text-emerald-600" size={24} />
+      </div>
+      <div>
+        <h1 class="text-2xl font-semibold text-stone-900">{label}</h1>
+        <p class="text-stone-500 text-sm">{count} charges{methodFilter ? ' · filtered' : ''}</p>
+      </div>
+    </div>
+    <div class="text-right">
+      <div class="text-xs text-stone-400 uppercase tracking-wide">Total</div>
+      <div class="text-3xl font-semibold text-stone-900 tabular-nums">{fmtMoney(total)}</div>
+    </div>
+  </header>
+
+  {methodFilter && (
+    <div class="mb-4 bg-sky-50 border border-sky-200 rounded-xl px-4 py-3 flex items-center gap-3">
+      <CreditCard size={16} class="text-sky-600" />
+      <div class="flex-1 text-sm text-sky-900">
+        Filtering by <span class="font-mono font-semibold">{methodFilter}</span>
+        {activeMethodMeta?.label && <> · {activeMethodMeta.label}</>}
+        {activeMethodMeta?.ownerName && <> · owned by <span class="font-medium">{activeMethodMeta.ownerName}</span></>}
+      </div>
+      <a
+        href={`/expenses/${month}?method=all${statusFilter !== 'all' ? `&status=${statusFilter}` : ''}`}
+        class="inline-flex items-center gap-1 text-xs text-sky-700 hover:text-sky-900 font-medium"
+      >
+        <X size={13} /> Clear
+      </a>
+    </div>
+  )}
+
+  {/* Status filter chips */}
+  <div class="mb-6 flex flex-wrap items-center gap-2 text-xs">
+    {([
+      { key: 'all',       label: 'All',        color: 'bg-stone-100 text-stone-700 border-stone-300',         activeColor: 'bg-stone-800 text-white border-stone-800',         Icon: null },
+      { key: 'none',      label: 'Unreviewed', color: 'bg-white text-stone-600 border-stone-300',             activeColor: 'bg-stone-600 text-white border-stone-600',         Icon: Circle },
+      { key: 'good',      label: 'Good',       color: 'bg-emerald-50 text-emerald-700 border-emerald-300',    activeColor: 'bg-emerald-500 text-white border-emerald-500',     Icon: Check },
+      { key: 'to_review', label: 'To review',  color: 'bg-amber-50 text-amber-700 border-amber-300',          activeColor: 'bg-amber-500 text-white border-amber-500',         Icon: CircleHelp },
+      { key: 'to_move',   label: 'To move',    color: 'bg-sky-50 text-sky-700 border-sky-300',                activeColor: 'bg-sky-500 text-white border-sky-500',             Icon: ArrowRightLeft },
+      { key: 'cancelled', label: 'Cancelled',  color: 'bg-rose-50 text-rose-700 border-rose-300',             activeColor: 'bg-rose-500 text-white border-rose-500',           Icon: X },
+    ] as const).map((chip) => {
+      const active = statusFilter === chip.key;
+      const count = statusCounts[chip.key as keyof typeof statusCounts];
+      const params = new URLSearchParams();
+      if (chip.key !== 'all') params.set('status', chip.key);
+      const href = `/expenses/${month}${params.toString() ? '?' + params.toString() : ''}`;
+      return (
+        <a
+          href={href}
+          class={`inline-flex items-center gap-1.5 border rounded-full px-3 py-1.5 font-medium transition ${active ? chip.activeColor : chip.color + ' hover:border-stone-400'}`}
+        >
+          {chip.Icon && <chip.Icon size={12} />}
+          {chip.label}
+          <span class={`tabular-nums ${active ? 'opacity-80' : 'opacity-60'}`}>· {count}</span>
+        </a>
+      );
+    })}
+  </div>
+
+  {unmatchedSet.size > 0 && (
+    <div class="bg-amber-50 border border-amber-200 rounded-2xl p-5 mb-6">
+      <div class="text-sm font-medium text-amber-800 mb-2">
+        {unmatchedSet.size} unmatched vendor{unmatchedSet.size === 1 ? '' : 's'} — add them to expenses_vendors to enrich reports
+      </div>
+      <div class="text-xs text-amber-700 flex flex-wrap gap-x-3 gap-y-1">
+        {Array.from(unmatchedSet.entries())
+          .sort((a, b) => b[1] - a[1])
+          .map(([name, amt]) => (
+            <span>{name} <span class="text-amber-500">({fmtMoney(amt)})</span></span>
+          ))}
+      </div>
+    </div>
+  )}
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+    {/* By vendor */}
+    <section class="lg:col-span-2 bg-white border border-stone-200 rounded-2xl overflow-hidden">
+      <div class="px-5 py-3 border-b border-stone-100 flex items-center gap-2">
+        <TrendingUp size={16} class="text-stone-400" />
+        <h2 class="text-sm font-semibold text-stone-800">By vendor</h2>
+        <span class="text-xs text-stone-400">· {vendorRollup.length} unique</span>
+      </div>
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-[11px] uppercase tracking-wider text-stone-500 bg-stone-50">
+            <th class="text-left font-medium px-5 py-2">Vendor</th>
+            <th class="text-right font-medium px-3 py-2 w-12">#</th>
+            <th class="text-right font-medium px-3 py-2 w-16">%</th>
+            <th class="text-right font-medium px-3 py-2 w-28">Total</th>
+            <th class="text-right font-medium px-5 py-2 w-40">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {vendorRollup.map((v) => {
+            const barPct = Math.max(1, (v.total / vendorRollup[0].total) * 100);
+            return (
+              <tr class="border-t border-stone-100 hover:bg-stone-50/60">
+                <td class="px-5 py-2.5 relative">
+                  <div class="absolute inset-y-0 left-0 bg-emerald-50" style={`width: ${barPct}%`} />
+                  <div class="relative">
+                    <div class="font-medium text-stone-900">{v.canonical}</div>
+                    {v.matched && (
+                      <div class="flex items-center gap-2 text-[11px] text-stone-500 mt-0.5">
+                        {v.matched.group_name && v.matched.group_name !== 'Unknown' && (
+                          <span>{v.matched.group_name}</span>
+                        )}
+                        {v.matched.person && <span>· {v.matched.person}</span>}
+                        {v.matched.frequency && <span>· {v.matched.frequency}</span>}
+                      </div>
+                    )}
+                    {!v.matched && (
+                      <div class="text-[11px] text-amber-600 mt-0.5">unmatched</div>
+                    )}
+                  </div>
+                </td>
+                <td class="px-3 py-2.5 text-right text-stone-500 tabular-nums relative">{v.count}</td>
+                <td class="px-3 py-2.5 text-right text-stone-500 tabular-nums relative">{pct(v.total)}</td>
+                <td class="px-3 py-2.5 text-right font-medium text-stone-900 tabular-nums relative">
+                  {fmtMoney(v.total)}
+                </td>
+                <td class="px-5 py-2.5 text-right relative">
+                  <ExpenseStatusPicker
+                    client:load
+                    ids={v.ids}
+                    initial={rollupStatus(v)}
+                    methods={methodsForPicker}
+                    size="sm"
+                  />
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </section>
+
+    {/* By method */}
+    <section class="bg-white border border-stone-200 rounded-2xl overflow-hidden">
+      <div class="px-5 py-3 border-b border-stone-100 flex items-center justify-between">
+        <h2 class="text-sm font-semibold text-stone-800">By payment method</h2>
+        <a href="/expenses/methods" class="text-xs text-stone-400 hover:text-stone-700">Manage →</a>
+      </div>
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-[11px] uppercase tracking-wider text-stone-500 bg-stone-50">
+            <th class="text-left font-medium px-5 py-2">Method</th>
+            <th class="text-right font-medium px-3 py-2 w-12">#</th>
+            <th class="text-right font-medium px-5 py-2 w-28">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {methodRollup.map((m) => {
+            const meta = methodByName.get(m.method);
+            return (
+              <tr class="border-t border-stone-100 hover:bg-stone-50/60">
+                <td class="px-5 py-2.5">
+                  <a
+                    href={`/expenses/${month}?method=${encodeURIComponent(m.method)}`}
+                    class="block hover:text-sky-600"
+                  >
+                    <div class="font-mono text-xs text-stone-700">{m.method}</div>
+                    {(meta?.label || meta?.ownerName) && (
+                      <div class="text-[11px] text-stone-400 mt-0.5">
+                        {meta?.label}
+                        {meta?.label && meta?.ownerName && ' · '}
+                        {meta?.ownerName}
+                      </div>
+                    )}
+                  </a>
+                </td>
+                <td class="px-3 py-2.5 text-right text-stone-500 tabular-nums">{m.count}</td>
+                <td class="px-5 py-2.5 text-right font-medium text-stone-900 tabular-nums">
+                  {fmtMoney(m.total)}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </section>
+  </div>
+
+  {/* Full charge list */}
+  <section class="bg-white border border-stone-200 rounded-2xl overflow-hidden">
+    <div class="px-5 py-3 border-b border-stone-100 flex items-center gap-2">
+      <Calendar size={16} class="text-stone-400" />
+      <h2 class="text-sm font-semibold text-stone-800">All charges</h2>
+      <span class="text-xs text-stone-400">· newest first</span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-[11px] uppercase tracking-wider text-stone-500 bg-stone-50">
+            <th class="text-left font-medium px-5 py-2.5 w-20">Date</th>
+            <th class="text-left font-medium px-3 py-2.5">Vendor</th>
+            <th class="text-left font-medium px-3 py-2.5 w-28">Method</th>
+            <th class="text-right font-medium px-3 py-2.5 w-32">Amount</th>
+            <th class="text-right font-medium px-5 py-2.5 w-36">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {enriched.map((c) => {
+            const meta = methodByName.get(c.method);
+            return (
+              <tr class="border-t border-stone-100 hover:bg-stone-50/60">
+                <td class="px-5 py-2.5 text-stone-500 whitespace-nowrap">{fmtDate(c.date)}</td>
+                <td class="px-3 py-2.5">
+                  <div class="font-medium text-stone-900">
+                    {c.canonical}
+                    {c.matched && c.matched.name.toLowerCase() !== c.vendor.toLowerCase() && (
+                      <span class="ml-1.5 text-xs font-normal text-stone-400">(raw: {c.vendor})</span>
+                    )}
+                  </div>
+                  {!c.matched && (
+                    <div class="text-[11px] text-amber-600 mt-0.5">unmatched</div>
+                  )}
+                </td>
+                <td class="px-3 py-2.5">
+                  <a
+                    href={`/expenses/${month}?method=${encodeURIComponent(c.method)}`}
+                    class="inline-block hover:text-sky-600"
+                  >
+                    <div class="font-mono text-xs text-stone-700">{c.method}</div>
+                    {meta?.ownerName && (
+                      <div class="text-[10px] text-stone-400">{meta.ownerName}</div>
+                    )}
+                  </a>
+                </td>
+                <td class="px-3 py-2.5 text-right font-medium text-stone-900 tabular-nums">
+                  {fmtMoney(Number(c.amount))}
+                </td>
+                <td class="px-5 py-2.5 text-right">
+                  <ExpenseStatusPicker
+                    client:load
+                    id={c.expense_id}
+                    initial={c.status}
+                    currentMethod={c.method}
+                    moveTargetInitial={c.move_to_method}
+                    methods={methodsForPicker}
+                  />
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</AppLayout>

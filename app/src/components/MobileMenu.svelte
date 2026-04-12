@@ -1,7 +1,7 @@
 <script lang="ts">
   import {
     Menu, X, Target, AlertCircle, ListTodo, ChartBar, Focus, Eye,
-    ListChecks, Contact, Megaphone, BookOpen, Users, Link2, Plane, Network, Quote, LogOut,
+    ListChecks, Contact, Megaphone, BookOpen, Users, Link2, Plane, Network, Quote, Wallet, LogOut,
   } from 'lucide-svelte';
 
   type Team = { id: string; name: string };
@@ -49,6 +49,7 @@
   const secondary = [
     { href: '/chart',          label: 'Org Chart',             icon: Network },
     { href: '/my-tasks',       label: 'My Tasks',              icon: ListChecks },
+    { href: '/expenses',       label: 'Expenses',              icon: Wallet },
     { href: '/directory',      label: 'Directory',             icon: Contact },
     { href: '/updates',        label: 'Updates',               icon: Megaphone },
     { href: '/testimonials',   label: 'Testimonials',          icon: Quote },
