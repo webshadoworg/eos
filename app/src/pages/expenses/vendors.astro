@@ -2,6 +2,11 @@
 import AppLayout from '~/layouts/AppLayout.astro';
 import { Store, ArrowLeft, Plus, Pencil, X, Search, Trash2 } from 'lucide-svelte';
 import { supabase } from '~/lib/supabase';
+import { canAccessExpenses } from '~/lib/permissions';
+
+if (!canAccessExpenses(Astro.locals)) {
+  return new Response('Forbidden — Finance team members only', { status: 403 });
+}
 
 const url = Astro.url;
 const editIdParam = url.searchParams.get('edit');

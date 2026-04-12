@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '~/lib/supabase';
+import { canAccessExpenses } from '~/lib/permissions';
 
 // Parses a textarea with one value per line into a clean string array.
 function parseLines(raw: string | null): string[] {
@@ -7,7 +8,8 @@ function parseLines(raw: string | null): string[] {
   return raw.split('\n').map((s) => s.trim()).filter(Boolean);
 }
 
-export const POST: APIRoute = async ({ request, redirect }) => {
+export const POST: APIRoute = async ({ request, locals, redirect }) => {
+  if (!canAccessExpenses(locals)) return new Response('Forbidden', { status: 403 });
   const form = await request.formData();
   const action = String(form.get('_action') ?? 'create');
   const back = String(form.get('back') ?? '/expenses/vendors');

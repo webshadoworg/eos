@@ -3,6 +3,7 @@ import '~/styles/global.css';
 import { Mountain, Target, AlertCircle, ListTodo, ChartBar, Focus, Eye, LogOut } from 'lucide-svelte';
 import MoreMenu from '~/components/MoreMenu.svelte';
 import MobileMenu from '~/components/MobileMenu.svelte';
+import { canAccessExpenses } from '~/lib/permissions';
 
 interface Props {
   title?: string;
@@ -13,6 +14,7 @@ const user = Astro.locals.user;
 const path = Astro.url.pathname;
 const teams = Astro.locals.allowedTeams;
 const currentTeam = Astro.locals.currentTeam;
+const canSeeExpenses = canAccessExpenses(Astro.locals);
 const backPath = Astro.url.pathname + Astro.url.search;
 
 const nav = [
@@ -47,6 +49,7 @@ const initials = (n: string) =>
             currentPath={path}
             userName={user?.fullName || user?.email || ''}
             backPath={backPath}
+            canSeeExpenses={canSeeExpenses}
           />
         </div>
 
@@ -102,7 +105,7 @@ const initials = (n: string) =>
 
         <!-- Desktop: gear menu -->
         <div class="hidden md:block">
-          <MoreMenu client:load />
+          <MoreMenu client:load canSeeExpenses={canSeeExpenses} />
         </div>
 
         <!-- Desktop: user name + logout -->

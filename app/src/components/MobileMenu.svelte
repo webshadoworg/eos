@@ -11,12 +11,14 @@
     currentPath,
     userName,
     backPath,
+    canSeeExpenses = false,
   } = $props<{
     teams: Team[];
     currentTeamId: string | null;
     currentPath: string;
     userName: string;
     backPath: string;
+    canSeeExpenses?: boolean;
   }>();
 
   let open = $state(false);
@@ -46,18 +48,19 @@
     { href: '/focus',     label: 'Current Focus', icon: Focus,       match: (p: string) => p.startsWith('/focus') },
   ];
 
-  const secondary = [
-    { href: '/chart',          label: 'Org Chart',             icon: Network },
-    { href: '/my-tasks',       label: 'My Tasks',              icon: ListChecks },
-    { href: '/expenses',       label: 'Expenses',              icon: Wallet },
-    { href: '/directory',      label: 'Directory',             icon: Contact },
-    { href: '/updates',        label: 'Updates',               icon: Megaphone },
-    { href: '/testimonials',   label: 'Testimonials',          icon: Quote },
-    { href: '/processes',      label: 'Processes',             icon: BookOpen },
-    { href: '/teams',          label: 'Teams & People',        icon: Users },
-    { href: '/links',          label: 'Links',                 icon: Link2 },
-    { href: '/trips',          label: 'Add a Trip',            icon: Plane },
+  const allSecondary = [
+    { href: '/chart',          label: 'Org Chart',             icon: Network,     always: true },
+    { href: '/my-tasks',       label: 'My Tasks',              icon: ListChecks,  always: true },
+    { href: '/expenses',       label: 'Expenses',              icon: Wallet,      always: false },
+    { href: '/directory',      label: 'Directory',             icon: Contact,     always: true },
+    { href: '/updates',        label: 'Updates',               icon: Megaphone,   always: true },
+    { href: '/testimonials',   label: 'Testimonials',          icon: Quote,       always: true },
+    { href: '/processes',      label: 'Processes',             icon: BookOpen,    always: true },
+    { href: '/teams',          label: 'Teams & People',        icon: Users,       always: true },
+    { href: '/links',          label: 'Links',                 icon: Link2,       always: true },
+    { href: '/trips',          label: 'Add a Trip',            icon: Plane,       always: true },
   ];
+  const secondary = $derived(allSecondary.filter((i) => i.always || (i.href === '/expenses' && canSeeExpenses)));
 </script>
 
 <!-- Hamburger trigger -->

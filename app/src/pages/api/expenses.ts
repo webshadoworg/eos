@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '~/lib/supabase';
+import { canAccessExpenses } from '~/lib/permissions';
 
 const ALLOWED_STATUSES = new Set(['none', 'good', 'to_review', 'cancelled', 'to_move']);
 
@@ -7,7 +8,8 @@ const ALLOWED_STATUSES = new Set(['none', 'good', 'to_review', 'cancelled', 'to_
 //   single: { id, status, move_to_method? }
 //   bulk:   { ids: [...], status, move_to_method? }
 // move_to_method is kept when status='to_move' and cleared on any other status.
-export const PATCH: APIRoute = async ({ request }) => {
+export const PATCH: APIRoute = async ({ request, locals }) => {
+  if (!canAccessExpenses(locals)) return new Response('Forbidden', { status: 403 });
   const body = await request.json();
   const { id, ids, status, move_to_method } = body ?? {};
 

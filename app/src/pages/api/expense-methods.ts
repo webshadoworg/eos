@@ -1,7 +1,9 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '~/lib/supabase';
+import { canAccessExpenses } from '~/lib/permissions';
 
-export const POST: APIRoute = async ({ request, redirect }) => {
+export const POST: APIRoute = async ({ request, locals, redirect }) => {
+  if (!canAccessExpenses(locals)) return new Response('Forbidden', { status: 403 });
   const form = await request.formData();
   const action = String(form.get('_action') ?? 'create');
   const back = String(form.get('back') ?? '/expenses/methods');

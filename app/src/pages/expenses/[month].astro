@@ -4,6 +4,11 @@ import ExpenseStatusPicker from '~/components/ExpenseStatusPicker.svelte';
 import { Wallet, ArrowLeft, Calendar, TrendingUp, CreditCard, X, Check, CircleHelp, Circle, ArrowRightLeft } from 'lucide-svelte';
 import { supabase } from '~/lib/supabase';
 import { resolveMethodFilter } from '~/lib/expense-method';
+import { canAccessExpenses } from '~/lib/permissions';
+
+if (!canAccessExpenses(Astro.locals)) {
+  return new Response('Forbidden — Finance team members only', { status: 403 });
+}
 
 const { month } = Astro.params;
 if (!month || !/^\d{4}-\d{2}$/.test(month)) return new Response('Invalid month', { status: 400 });
