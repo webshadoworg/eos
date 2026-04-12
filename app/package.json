@@ -1,0 +1,32 @@
+{
+  "name": "gye-eos-app",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev --port 6133 --host",
+    "build": "astro build",
+    "preview": "astro preview --port 6133",
+    "astro": "astro",
+    "typecheck": "astro check"
+  },
+  "dependencies": {
+    "@astrojs/netlify": "^6.5.10",
+    "@astrojs/svelte": "^7.1.0",
+    "@supabase/supabase-js": "^2.48.0",
+    "@tailwindcss/typography": "^0.5.19",
+    "@tailwindcss/vite": "^4.0.6",
+    "arctic": "^3.5.0",
+    "astro": "^5.2.5",
+    "jose": "^5.9.6",
+    "lucide-svelte": "^0.474.0",
+    "quill": "^2.0.3",
+    "svelte": "^5.19.6",
+    "tailwindcss": "^4.0.6"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.4",
+    "@types/node": "^22.13.5",
+    "typescript": "^5.7.3"
+  }
+}
