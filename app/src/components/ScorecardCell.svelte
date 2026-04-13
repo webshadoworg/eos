@@ -3,6 +3,7 @@
     measurableId,
     date,
     initial,
+    initialNote = null,
     frequency,
     valueType = 'number',
     goal = null,
@@ -11,6 +12,7 @@
     measurableId: string;
     date: string;
     initial: number | null;
+    initialNote?: string | null;
     frequency: 'weekly' | 'monthly';
     valueType?: string;
     goal?: number | null;
@@ -18,10 +20,13 @@
   }>();
 
   let value = $state<number | null>(initial);
+  let note = $state<string | null>(initialNote);
   let editing = $state(false);
-  let draft = $state('');
+  let draftValue = $state('');
+  let draftNote = $state('');
   let pending = $state(false);
   let inputEl: HTMLInputElement | null = $state(null);
+  let popoverEl: HTMLDivElement | null = $state(null);
 
   const displayed = $derived.by(() => {
     if (value == null) return '–';
@@ -42,59 +47,90 @@
   });
 
   function startEdit() {
-    draft = value == null ? '' : String(value);
+    draftValue = value == null ? '' : String(value);
+    draftNote = note ?? '';
     editing = true;
     queueMicrotask(() => inputEl?.focus());
   }
 
   async function save() {
     if (!editing) return;
-    const raw = draft.trim();
-    const next = raw === '' ? null : Number(raw.replace(/[$,]/g, ''));
-    if (next !== null && Number.isNaN(next)) { editing = false; return; }
+    const raw = draftValue.trim();
+    const nextValue = raw === '' ? null : Number(raw.replace(/[$,]/g, ''));
+    if (nextValue !== null && Number.isNaN(nextValue)) { editing = false; return; }
+    const nextNote = draftNote.trim() || null;
     pending = true;
     const res = await fetch('/api/scorecard', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ measurable_id: measurableId, date, value: next, frequency }),
+      body: JSON.stringify({ measurable_id: measurableId, date, value: nextValue, note: nextNote, frequency }),
     });
-    if (res.ok) value = next;
+    if (res.ok) {
+      value = nextValue;
+      note = nextNote;
+    }
     pending = false;
     editing = false;
   }
 
   function handleKey(e: KeyboardEvent) {
-    if (e.key === 'Enter') save();
-    else if (e.key === 'Escape') editing = false;
+    if (e.key === 'Enter' && !e.shiftKey && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
+      e.preventDefault();
+      save();
+    } else if (e.key === 'Escape') {
+      editing = false;
+    }
+  }
+
+  function onPopoverBlur(e: FocusEvent) {
+    const next = e.relatedTarget as Node | null;
+    if (popoverEl && next && popoverEl.contains(next)) return;
+    save();
   }
 </script>
 
-<!--
-  Both the button and the input use the exact same box model so that
-  toggling between them never shifts the column width or row height:
-  - same width (w-full)
-  - same padding (px-1 py-1)
-  - same font size/weight/leading (text-sm font-medium leading-5)
-  - same 1px border (transparent in display mode, violet in edit mode)
--->
 <div class="relative {bgColor} rounded">
+  <button
+    type="button"
+    onclick={startEdit}
+    title={note ?? undefined}
+    class="block w-full text-center text-sm font-medium leading-5 px-1 py-1 border border-transparent rounded cursor-text hover:border-stone-300 {color}"
+  >
+    {displayed}
+  </button>
+  {#if note}
+    <span
+      class="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-amber-500 pointer-events-none"
+      aria-label="Has note"
+    ></span>
+  {/if}
+
   {#if editing}
-    <input
-      bind:this={inputEl}
-      type="text"
-      bind:value={draft}
-      onblur={save}
-      onkeydown={handleKey}
-      disabled={pending}
-      class="w-full text-center text-sm font-medium leading-5 px-1 py-1 bg-white border border-violet-400 rounded focus:outline-none"
-    />
-  {:else}
-    <button
-      type="button"
-      onclick={startEdit}
-      class="block w-full text-center text-sm font-medium leading-5 px-1 py-1 border border-transparent rounded cursor-text hover:border-stone-300 {color}"
+    <div
+      bind:this={popoverEl}
+      onfocusout={onPopoverBlur}
+      class="absolute z-20 left-1/2 top-full mt-1 -translate-x-1/2 w-56 bg-white border border-stone-200 rounded-lg shadow-lg p-2 space-y-2"
     >
-      {displayed}
-    </button>
+      <input
+        bind:this={inputEl}
+        type="text"
+        bind:value={draftValue}
+        onkeydown={handleKey}
+        disabled={pending}
+        placeholder="Value"
+        class="w-full text-sm font-medium leading-5 px-2 py-1.5 bg-white border border-stone-300 rounded focus:outline-none focus:border-violet-400"
+      />
+      <textarea
+        bind:value={draftNote}
+        onkeydown={handleKey}
+        disabled={pending}
+        placeholder="Note (optional)"
+        rows="2"
+        class="w-full text-xs leading-snug px-2 py-1.5 bg-white border border-stone-200 rounded focus:outline-none focus:border-violet-400 resize-none"
+      ></textarea>
+      <div class="flex items-center justify-between text-[10px] text-stone-400">
+        <span>Enter to save · Esc to cancel</span>
+      </div>
+    </div>
   {/if}
 </div>
