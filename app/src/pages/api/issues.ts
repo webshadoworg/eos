@@ -27,7 +27,7 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
   if (action === 'create') {
     const title = String(form.get('title') ?? '').trim();
     const team_id = String(form.get('team_id') ?? '') || null;
-    const term_type = (String(form.get('term_type') ?? 'short_term')) as 'short_term' | 'long_term' | 'idea_backlog';
+    const term_type = (String(form.get('term_type') ?? 'short_term')) as 'short_term' | 'long_term';
     const owner_employee_id = String(form.get('owner_employee_id') ?? '') || null;
     if (!title) return redirect(back);
     if (!canAccessTeam(locals, team_id)) return new Response('Forbidden', { status: 403 });

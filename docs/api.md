@@ -24,7 +24,7 @@ Valid keys come from the `API_KEYS` environment variable on the server — a com
 | GET | `/api/v1/contacts` | Optional `?q=` name search, `?category=`, `?employee_id=`. |
 | GET | `/api/v1/teams` | List teams with members. |
 | GET | `/api/v1/rocks` | List non-archived rocks with milestones. |
-| GET | `/api/v1/issues` | Optional `?assignee=<email>`, `?team_id=`, `?status=`, `?term=short_term\|long_term\|idea_backlog`. |
+| GET | `/api/v1/issues` | Optional `?assignee=<email>`, `?team_id=`, `?status=`, `?term=short_term\|long_term`. |
 | POST | `/api/v1/issues` | Create an issue. |
 | PATCH | `/api/v1/issues` | Mark an issue solved/open. |
 | GET | `/api/v1/todos` | Optional `?assignee=<email>`, `?team_id=`, `?status=open\|done\|archived\|all` (default `open`). |
@@ -43,7 +43,7 @@ Valid keys come from the `API_KEYS` environment variable on the server — a com
   "owner_email": "alice@gye.org",
   "team_id": "…",
   "team_name": "Finance",
-  "term_type": "short_term | long_term | idea_backlog (default short_term)",
+  "term_type": "short_term | long_term (default short_term)",
   "type": "string (optional)",
   "priority": 1
 }
