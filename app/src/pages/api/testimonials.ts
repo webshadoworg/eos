@@ -24,7 +24,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       image_url: String(form.get('image_url') ?? '') || null,
       video_url: String(form.get('video_url') ?? '') || null,
       screenshot_url: String(form.get('screenshot_url') ?? '') || null,
-      date: String(form.get('date') ?? '') || null,
+      date: String(form.get('date') ?? '') || new Date().toISOString().slice(0, 10),
       featured_in_newsletter: form.get('featured_in_newsletter') === 'on',
     });
     if (error) return new Response(`Error: ${error.message}`, { status: 500 });
