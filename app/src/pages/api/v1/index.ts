@@ -20,6 +20,9 @@ export const GET: APIRoute = async ({ request }) => {
       'GET /api/v1/todos':                'List todos. Optional ?assignee=<email>, ?team_id=, ?status=open|done|archived|all (default open).',
       'POST /api/v1/todos':               'Create a todo. Body: { title, description?, assignee_email?, team_id? | team_name?, due_date?, is_urgent? }. Returns { id }.',
       'PATCH /api/v1/todos':              'Mark a todo done/open. Body: { id, done? (default true) }.',
+      'GET /api/v1/feature-ideas':         'List feature ideas. Optional ?owner=<email>, ?status=, ?term=, ?tag=.',
+      'POST /api/v1/feature-ideas':        'Create a feature idea. Body: { title, description?, owner_email?, term_type?, priority? (1-5), tags? (string[]) }. Returns { id }.',
+      'PATCH /api/v1/feature-ideas':       'Update a feature idea. Body: { id, solved?, status?, tags? }.',
       'GET /api/v1/vto':                  'Get the singleton V/TO (vision + traction + swot).',
     },
   });
