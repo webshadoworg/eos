@@ -74,7 +74,7 @@ export const GET: APIRoute = async ({ request, url }) => {
 //         priority? (1-5) }
 // ============================================================
 const ALLOWED_ISSUE_TYPES = new Set(['problem', 'idea', 'question', 'brainstorm', 'update']);
-const ALLOWED_TERMS = new Set(['short_term', 'long_term']);
+const ALLOWED_TERMS = new Set(['short_term', 'long_term', 'idea_backlog']);
 
 export const POST: APIRoute = async ({ request }) => {
   const unauth = requireApiKey(request);
