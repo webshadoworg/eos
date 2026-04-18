@@ -43,14 +43,14 @@ function fmtMonth(start: Date) {
 const today = new Date();
 const periods: { start: Date; end: Date; label: string }[] = [];
 if (frequency === 'weekly') {
-  const base = startOfWeek(today);
+  const base = addDays(startOfWeek(today), -7);
   for (let i = 0; i < COLS; i++) {
     const start = addDays(base, -7 * (i + offset));
     const end = addDays(start, 6);
     periods.push({ start, end, label: fmtRange(start, end) });
   }
 } else {
-  const base = startOfMonth(today);
+  const base = addMonths(startOfMonth(today), -1);
   for (let i = 0; i < COLS; i++) {
     const start = addMonths(base, -(i + offset));
     const end = addDays(addMonths(start, 1), -1);
