@@ -1,0 +1,318 @@
+---
+import AppLayout from '~/layouts/AppLayout.astro';
+import ExpenseStatusPicker from '~/components/ExpenseStatusPicker.svelte';
+import ExpenseNotes from '~/components/ExpenseNotes.svelte';
+import VendorInfoTip from '~/components/VendorInfoTip.astro';
+import VendorEditPanel from '~/components/VendorEditPanel.svelte';
+import { Wallet, ArrowLeft, Calendar, AlertCircle, Circle, CircleHelp, ArrowRightLeft, CreditCard, X } from 'lucide-svelte';
+import { supabase } from '~/lib/supabase';
+import { resolveMethodFilter } from '~/lib/expense-method';
+import { canAccessExpenses, getOwnedMethods } from '~/lib/permissions';
+
+const isFinance = canAccessExpenses(Astro.locals);
+const ownedMethods = isFinance ? [] : await getOwnedMethods(Astro.locals);
+if (!isFinance && ownedMethods.length === 0) {
+  return new Response('Forbidden — Finance team members only', { status: 403 });
+}
+
+const methodFilter = resolveMethodFilter(Astro.url, Astro.cookies);
+if (!isFinance) {
+  if (!methodFilter || !ownedMethods.includes(methodFilter)) {
+    return Astro.redirect(`/expenses/review?method=${encodeURIComponent(ownedMethods[0])}`);
+  }
+}
+
+// Filter: 'all' (none+to_review+to_move), 'none', 'to_review', 'to_move'
+const filter = Astro.url.searchParams.get('status') ?? 'all';
+const PENDING = ['none', 'to_review', 'to_move'] as const;
+const statusList = filter === 'all' ? PENDING : [filter];
+
+// Counts for filter chips — always across PENDING so the numbers stay stable.
+let countsQuery = supabase.from('expenses').select('status, amount').in('status', PENDING as unknown as string[]);
+if (methodFilter) countsQuery = countsQuery.eq('method', methodFilter);
+const { data: countsData } = await countsQuery;
+const statusCounts = {
+  all:       (countsData ?? []).length,
+  none:      (countsData ?? []).filter((r: any) => r.status === 'none').length,
+  to_review: (countsData ?? []).filter((r: any) => r.status === 'to_review').length,
+  to_move:   (countsData ?? []).filter((r: any) => r.status === 'to_move').length,
+};
+
+let expQuery = supabase
+  .from('expenses')
+  .select('expense_id, month, date, method, vendor, amount, status, move_to_method')
+  .in('status', statusList as unknown as string[])
+  .order('date', { ascending: false })
+  .order('expense_id', { ascending: false });
+if (methodFilter) expQuery = expQuery.eq('method', methodFilter);
+
+const [{ data: expenses }, { data: vendors }, { data: methods }] = await Promise.all([
+  expQuery,
+  supabase
+    .from('expenses_vendors')
+    .select('vendor_id, name, person_employee_id, description, frequency, status, group_name, latest_update, to_do, review_again, tags, aliases, report_matches, person:employees!expenses_vendors_person_employee_id_fkey(id, full_name)'),
+  supabase.from('expense_methods').select('name, label, employee:employees(id, full_name)'),
+]);
+
+type Expense = {
+  expense_id: number;
+  month: string;
+  date: string;
+  method: string;
+  vendor: string;
+  amount: string | number;
+  status: 'none' | 'good' | 'to_review' | 'cancelled' | 'to_move';
+  move_to_method: string | null;
+};
+
+// Vendor match (case-insensitive) — same logic as the month page.
+type Vendor = {
+  vendor_id: number;
+  name: string;
+  person: { id: string; full_name: string } | { id: string; full_name: string }[] | null;
+  description: string | null; frequency: string | null; status: string | null;
+  group_name: string | null; latest_update: string | null; to_do: string | null;
+  review_again: string | null; tags: string[] | null; aliases: string[] | null;
+  report_matches: string[] | null;
+} & Record<string, unknown>;
+
+const vendorByKey = new Map<string, Vendor>();
+for (const v of (vendors ?? []) as Vendor[]) {
+  const keys = new Set<string>();
+  if (v.name) keys.add(v.name.trim().toLowerCase());
+  for (const a of v.aliases ?? []) if (a) keys.add(a.trim().toLowerCase());
+  for (const r of v.report_matches ?? []) if (r) keys.add(r.trim().toLowerCase());
+  for (const k of keys) if (!vendorByKey.has(k)) vendorByKey.set(k, v);
+}
+const matchVendor = (raw: string) => vendorByKey.get(raw.trim().toLowerCase()) ?? null;
+
+type MethodMeta = { name: string; label: string | null; ownerName: string | null };
+const methodByName = new Map<string, MethodMeta>();
+for (const m of (methods ?? []) as any[]) {
+  const employee = Array.isArray(m.employee) ? m.employee[0] : m.employee;
+  methodByName.set(m.name, { name: m.name, label: m.label, ownerName: employee?.full_name ?? null });
+}
+const methodsForPicker = Array.from(methodByName.values()).map((m) => ({ name: m.name, label: m.label, ownerName: m.ownerName }));
+const activeMethodMeta = methodFilter ? methodByName.get(methodFilter) ?? null : null;
+
+type EnrichedExpense = Expense & { matched: Vendor | null; canonical: string };
+const enriched: EnrichedExpense[] = ((expenses ?? []) as Expense[]).map((e) => {
+  const m = matchVendor(e.vendor);
+  return { ...e, matched: m, canonical: m?.name ?? e.vendor };
+});
+
+// Group by month, newest first.
+const byMonth = new Map<string, EnrichedExpense[]>();
+for (const e of enriched) {
+  if (!byMonth.has(e.month)) byMonth.set(e.month, []);
+  byMonth.get(e.month)!.push(e);
+}
+const monthGroups = Array.from(byMonth.entries())
+  .sort((a, b) => b[0].localeCompare(a[0]))
+  .map(([month, items]) => ({ month, items, total: items.reduce((s, e) => s + (Number(e.amount) || 0), 0) }));
+
+// Notes counts.
+const noteCounts = new Map<number, number>();
+const expenseIds = enriched.map((e) => e.expense_id);
+if (expenseIds.length > 0) {
+  const { data: noteRows } = await supabase.from('expense_notes').select('expense_id').in('expense_id', expenseIds);
+  for (const row of (noteRows ?? []) as { expense_id: number }[]) {
+    noteCounts.set(row.expense_id, (noteCounts.get(row.expense_id) ?? 0) + 1);
+  }
+}
+const chargeInfo: Record<number, { date: string; amount: number }> = {};
+for (const e of enriched) chargeInfo[e.expense_id] = { date: e.date, amount: Number(e.amount) || 0 };
+
+const currentEmployeeId = Astro.locals.user?.employeeId ?? '';
+const grandTotal = enriched.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+const grandCount = enriched.length;
+
+const fmtMoney = (n: number) =>
+  '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtDate = (d: string) =>
+  new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+const fmtMonth = (m: string) => {
+  const [y, mo] = m.split('-').map(Number);
+  return new Date(Date.UTC(y, (mo ?? 1) - 1, 1)).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+};
+
+function chipHref(next: string) {
+  const p = new URLSearchParams();
+  if (methodFilter) p.set('method', methodFilter);
+  if (next !== 'all') p.set('status', next);
+  const s = p.toString();
+  return `/expenses/review${s ? '?' + s : ''}`;
+}
+---
+<AppLayout title="Review charges · GYE EOS">
+  <a href={isFinance ? '/expenses' : '/'} class="inline-flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-900 mb-6">
+    <ArrowLeft size={16} /> {isFinance ? 'Back to Expenses' : 'Back to Home'}
+  </a>
+
+  <header class="flex items-start justify-between mb-6">
+    <div class="flex items-center gap-3">
+      <div class="w-12 h-12 rounded-xl bg-amber-100 grid place-items-center">
+        <AlertCircle class="text-amber-600" size={24} />
+      </div>
+      <div>
+        <h1 class="text-2xl font-semibold text-stone-900">Charges to review</h1>
+        <p class="text-stone-500 text-sm">{grandCount} charges · across all months</p>
+      </div>
+    </div>
+    <div class="text-right">
+      <div class="text-xs text-stone-400 uppercase tracking-wide">Total</div>
+      <div class="text-3xl font-semibold text-stone-900 tabular-nums">{fmtMoney(grandTotal)}</div>
+    </div>
+  </header>
+
+  {methodFilter && (
+    <div class="mb-4 bg-sky-50 border border-sky-200 rounded-xl px-4 py-3 flex items-center gap-3">
+      <CreditCard size={16} class="text-sky-600" />
+      <div class="flex-1 text-sm text-sky-900">
+        Filtering by <span class="font-mono font-semibold">{methodFilter}</span>
+        {activeMethodMeta?.label && <> · {activeMethodMeta.label}</>}
+        {activeMethodMeta?.ownerName && <> · owned by <span class="font-medium">{activeMethodMeta.ownerName}</span></>}
+      </div>
+      {isFinance && (
+        <a href="/expenses/review?method=all" class="inline-flex items-center gap-1 text-xs text-sky-700 hover:text-sky-900 font-medium">
+          <X size={13} /> Clear
+        </a>
+      )}
+    </div>
+  )}
+
+  {/* Status filter chips */}
+  <div class="mb-6 flex flex-wrap items-center gap-2 text-xs">
+    {([
+      { key: 'all',       label: 'All pending', color: 'bg-stone-100 text-stone-700 border-stone-300',      active: 'bg-stone-800 text-white border-stone-800',         Icon: null as any },
+      { key: 'none',      label: 'New',         color: 'bg-white text-stone-600 border-stone-300',          active: 'bg-stone-600 text-white border-stone-600',         Icon: Circle },
+      { key: 'to_review', label: 'Flagged',     color: 'bg-amber-50 text-amber-700 border-amber-300',       active: 'bg-amber-500 text-white border-amber-500',         Icon: CircleHelp },
+      { key: 'to_move',   label: 'To move',     color: 'bg-sky-50 text-sky-700 border-sky-300',             active: 'bg-sky-500 text-white border-sky-500',             Icon: ArrowRightLeft },
+    ] as const).map((chip) => {
+      const active = filter === chip.key;
+      const n = statusCounts[chip.key as keyof typeof statusCounts];
+      return (
+        <a href={chipHref(chip.key)} class={`inline-flex items-center gap-1.5 border rounded-full px-3 py-1.5 font-medium transition ${active ? chip.active : chip.color + ' hover:border-stone-400'}`}>
+          {chip.Icon && <chip.Icon size={12} />}
+          {chip.label}
+          <span class={`tabular-nums ${active ? 'opacity-80' : 'opacity-60'}`}>· {n}</span>
+        </a>
+      );
+    })}
+  </div>
+
+  {monthGroups.length === 0 ? (
+    <div class="bg-white border border-stone-200 rounded-2xl px-4 py-12 text-center text-sm text-stone-400">
+      Nothing pending. You're all caught up.
+    </div>
+  ) : (
+    <div class="space-y-6">
+      {monthGroups.map((g) => (
+        <section class="bg-white border border-stone-200 rounded-2xl overflow-hidden">
+          <div class="px-5 py-3 border-b border-stone-100 flex items-center gap-2">
+            <Calendar size={16} class="text-stone-400" />
+            <h2 class="text-sm font-semibold text-stone-800">{fmtMonth(g.month)}</h2>
+            <span class="text-xs text-stone-400">· {g.items.length} {g.items.length === 1 ? 'charge' : 'charges'} · {fmtMoney(g.total)}</span>
+            <a href={`/expenses/${g.month}${methodFilter ? `?method=${encodeURIComponent(methodFilter)}` : ''}`} class="ml-auto text-xs text-stone-400 hover:text-stone-700">Full month →</a>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="text-[11px] uppercase tracking-wider text-stone-500 bg-stone-50">
+                  <th class="text-left font-medium px-5 py-2.5 w-20">Date</th>
+                  <th class="text-left font-medium px-3 py-2.5">Vendor</th>
+                  <th class="text-left font-medium px-3 py-2.5 w-28">Method</th>
+                  <th class="text-right font-medium px-3 py-2.5 w-32">Amount</th>
+                  <th class="text-center font-medium px-2 py-2.5 w-12">Notes</th>
+                  <th class="text-right font-medium px-5 py-2.5 w-36">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {g.items.map((c) => {
+                  const meta = methodByName.get(c.method);
+                  const noteCount = noteCounts.get(c.expense_id) ?? 0;
+                  return (
+                    <tr class="border-t border-stone-100 hover:bg-stone-50/60">
+                      <td class="px-5 py-2.5 text-stone-500 whitespace-nowrap">{fmtDate(c.date)}</td>
+                      <td class="px-3 py-2.5">
+                        <div class="font-medium text-stone-900 flex items-center flex-wrap">
+                          <span>{c.canonical}</span>
+                          {c.matched && <VendorInfoTip vendor={c.matched} name={c.canonical} />}
+                          {c.matched && c.matched.name.toLowerCase() !== c.vendor.toLowerCase() && (
+                            <span class="ml-1.5 text-xs font-normal text-stone-400">(raw: {c.vendor})</span>
+                          )}
+                        </div>
+                        {!c.matched && (
+                          <a
+                            href={`/expenses/vendors?new=1&name=${encodeURIComponent(c.canonical)}`}
+                            data-vendor-new-name={c.canonical}
+                            class="vendor-new-trigger inline-block text-[11px] text-amber-600 hover:text-amber-800 underline underline-offset-2 decoration-amber-300 hover:decoration-amber-600 mt-0.5"
+                          >
+                            unmatched · click to add
+                          </a>
+                        )}
+                      </td>
+                      <td class="px-3 py-2.5">
+                        <a href={`/expenses/review?method=${encodeURIComponent(c.method)}${filter !== 'all' ? `&status=${filter}` : ''}`} class="inline-block hover:text-sky-600">
+                          <div class="font-mono text-xs text-stone-700">{c.method}</div>
+                          {meta?.ownerName && <div class="text-[10px] text-stone-400">{meta.ownerName}</div>}
+                        </a>
+                      </td>
+                      <td class="px-3 py-2.5 text-right font-medium text-stone-900 tabular-nums">
+                        {fmtMoney(Number(c.amount))}
+                      </td>
+                      <td class="px-2 py-2.5 text-center">
+                        <ExpenseNotes
+                          client:load
+                          expenseId={c.expense_id}
+                          initialCount={noteCount}
+                          currentEmployeeId={currentEmployeeId}
+                        />
+                      </td>
+                      <td class="px-5 py-2.5 text-right">
+                        <ExpenseStatusPicker
+                          client:load
+                          id={c.expense_id}
+                          initial={c.status}
+                          currentMethod={c.method}
+                          moveTargetInitial={c.move_to_method}
+                          methods={methodsForPicker}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ))}
+    </div>
+  )}
+
+  <VendorEditPanel client:load />
+
+  <script is:inline>
+    document.addEventListener('click', (e) => {
+      const target = e.target instanceof Element ? e.target : null;
+      if (!target) return;
+      const editTrigger = target.closest('.vendor-info-trigger');
+      if (editTrigger) {
+        const vid = Number(editTrigger.getAttribute('data-vendor-id'));
+        if (Number.isInteger(vid) && vid > 0) {
+          e.preventDefault();
+          window.dispatchEvent(new CustomEvent('open-vendor-edit', { detail: { vendor_id: vid } }));
+          return;
+        }
+      }
+      const newTrigger = target.closest('.vendor-new-trigger');
+      if (newTrigger) {
+        const name = newTrigger.getAttribute('data-vendor-new-name') ?? '';
+        if (name) {
+          e.preventDefault();
+          window.dispatchEvent(new CustomEvent('open-vendor-edit', { detail: { name } }));
+        }
+      }
+    });
+  </script>
+</AppLayout>

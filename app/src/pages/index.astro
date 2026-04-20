@@ -161,7 +161,14 @@ const firstName = user.fullName?.split(' ')[0] || 'there';
                   </div>
                 </div>
               </div>
-              {c.pendingTotal === 0 && (
+              {c.pendingTotal > 0 ? (
+                <a
+                  href={`/expenses/review?method=${encodeURIComponent(c.name)}`}
+                  class="text-[11px] font-medium bg-amber-50 border border-amber-200 text-amber-700 rounded-full px-2.5 py-1 hover:bg-amber-100"
+                >
+                  Review all →
+                </a>
+              ) : (
                 <span class="text-[11px] font-medium bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full px-2.5 py-1">
                   ✓ clear
                 </span>

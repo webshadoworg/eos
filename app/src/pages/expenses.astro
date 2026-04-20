@@ -84,9 +84,9 @@ const vendorsWithNotes = (vendorRows ?? []).filter((v: any) =>
   (v.review_again ?? '').trim()
 ).length;
 
-const latestMonth = groups[0]?.month ?? null;
-const unapprovedHref = latestMonth ? `/expenses/${latestMonth}?status=none${methodFilter ? `&method=${encodeURIComponent(methodFilter)}` : ''}` : '/expenses';
-const flaggedHref = latestMonth ? `/expenses/${latestMonth}?status=to_review${methodFilter ? `&method=${encodeURIComponent(methodFilter)}` : ''}` : '/expenses';
+const reviewMethodQs = methodFilter ? `&method=${encodeURIComponent(methodFilter)}` : '';
+const unapprovedHref = `/expenses/review${methodFilter ? `?method=${encodeURIComponent(methodFilter)}` : ''}`;
+const flaggedHref = `/expenses/review?status=to_review${reviewMethodQs}`;
 
 const fmtMoney = (n: number) =>
   '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
