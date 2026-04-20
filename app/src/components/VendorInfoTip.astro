@@ -16,7 +16,9 @@ type Vendor = {
 
 interface Props { vendor: Vendor; name: string; }
 const { vendor, name } = Astro.props;
-const editHref = vendor.vendor_id ? `/expenses/vendors?edit=${vendor.vendor_id}` : '#';
+// Fallback link for unmatched vendors (no vendor_id) — the editor listens
+// for a custom event keyed to vendor_id when one exists.
+const fallbackHref = vendor.vendor_id ? `/expenses/vendors?edit=${vendor.vendor_id}` : '#';
 
 const p = Array.isArray(vendor.person) ? vendor.person[0] : vendor.person;
 const rows: { label: string; value: string }[] = [];
@@ -36,10 +38,11 @@ const hasContent = rows.length > 0;
 {hasContent && (
   <span class="relative inline-flex items-center group/tip align-middle">
     <a
-      href={editHref}
+      href={fallbackHref}
+      data-vendor-id={vendor.vendor_id}
       aria-label={`${name} details — open vendor editor`}
       title={`Open ${name} details`}
-      class="ml-1 text-stone-300 hover:text-violet-500 focus:text-violet-500 focus:outline-none"
+      class="vendor-info-trigger ml-1 text-stone-300 hover:text-violet-500 focus:text-violet-500 focus:outline-none"
     >
       <Info size={13} />
     </a>

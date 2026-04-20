@@ -3,6 +3,7 @@ import AppLayout from '~/layouts/AppLayout.astro';
 import ExpenseStatusPicker from '~/components/ExpenseStatusPicker.svelte';
 import ExpenseNotes from '~/components/ExpenseNotes.svelte';
 import VendorInfoTip from '~/components/VendorInfoTip.astro';
+import VendorEditPanel from '~/components/VendorEditPanel.svelte';
 import { Wallet, ArrowLeft, Calendar, TrendingUp, CreditCard, X, Check, CircleHelp, Circle, ArrowRightLeft, ChevronLeft, ChevronRight, Info } from 'lucide-svelte';
 import { supabase } from '~/lib/supabase';
 import { resolveMethodFilter } from '~/lib/expense-method';
@@ -584,4 +585,21 @@ const fmtMonthLabel = (m: string) => {
       </table>
     </div>
   </section>
+
+  <VendorEditPanel client:load />
+
+  <script is:inline>
+    // Intercept info-icon clicks so editing a matched vendor happens in a
+    // side panel on the current page instead of navigating to /expenses/vendors.
+    document.addEventListener('click', (e) => {
+      const target = e.target instanceof Element ? e.target : null;
+      if (!target) return;
+      const trigger = target.closest('.vendor-info-trigger');
+      if (!trigger) return;
+      const vid = Number(trigger.getAttribute('data-vendor-id'));
+      if (!Number.isInteger(vid) || vid <= 0) return;
+      e.preventDefault();
+      window.dispatchEvent(new CustomEvent('open-vendor-edit', { detail: { vendor_id: vid } }));
+    });
+  </script>
 </AppLayout>
