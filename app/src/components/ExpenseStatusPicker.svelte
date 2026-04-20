@@ -47,6 +47,12 @@
     return res.ok;
   }
 
+  function broadcast(next: string, prev: string, moveTargetValue: string | null) {
+    window.dispatchEvent(new CustomEvent('expense-status-changed', {
+      detail: { id, ids, status: next, prevStatus: prev, moveTarget: moveTargetValue },
+    }));
+  }
+
   function buildBody(patchFields: Record<string, unknown>): Record<string, unknown> {
     return Array.isArray(ids) && ids.length > 0
       ? { ids, ...patchFields }
@@ -69,6 +75,8 @@
     if (!ok) {
       status = prev;
       moveTarget = prevTarget;
+    } else {
+      broadcast(next, prev, null);
     }
     pending = false;
   }
@@ -84,6 +92,8 @@
     if (!ok) {
       status = prev;
       moveTarget = prevTarget;
+    } else {
+      broadcast('to_move', prev, target);
     }
     pending = false;
     picking = false;
