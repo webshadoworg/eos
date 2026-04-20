@@ -16,6 +16,20 @@ const prefillName = url.searchParams.get('name') ?? '';
 const search = (url.searchParams.get('q') ?? '').trim();
 const groupFilter = url.searchParams.get('group') ?? 'all';
 
+// If we were asked to add a vendor with a name that already exists (usually
+// from clicking "unmatched · click to add" on a month view), jump straight
+// into the editor for the existing record instead of 500-ing on insert.
+if (adding && prefillName) {
+  const { data: existing } = await supabase
+    .from('expenses_vendors')
+    .select('vendor_id')
+    .ilike('name', prefillName.trim())
+    .maybeSingle();
+  if (existing?.vendor_id) {
+    return Astro.redirect(`/expenses/vendors?edit=${existing.vendor_id}`);
+  }
+}
+
 let q = supabase
   .from('expenses_vendors')
   .select('vendor_id, name, person_employee_id, description, frequency, status, group_name, latest_update, to_do, review_again, tags, aliases, report_matches, person:employees!expenses_vendors_person_employee_id_fkey(id, full_name)')

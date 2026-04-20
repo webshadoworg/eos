@@ -17,6 +17,16 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
   if (action === 'create') {
     const name = String(form.get('name') ?? '').trim();
     if (!name) return redirect(back);
+    // If a vendor with this name already exists, route the user to its editor
+    // instead of raising a unique-constraint error.
+    const { data: existing } = await supabase
+      .from('expenses_vendors')
+      .select('vendor_id')
+      .ilike('name', name)
+      .maybeSingle();
+    if (existing?.vendor_id) {
+      return redirect(`/expenses/vendors?edit=${existing.vendor_id}`);
+    }
     const reportMatches = parseLines(String(form.get('report_matches') ?? ''));
     const { error } = await supabase
       .from('expenses_vendors')
