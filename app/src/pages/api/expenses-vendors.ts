@@ -8,19 +8,25 @@ function parseLines(raw: string | null): string[] {
   return raw.split('\n').map((s) => s.trim()).filter(Boolean);
 }
 
-// GET /api/expenses-vendors?id=123 — fetches one vendor for the inline editor.
+// GET /api/expenses-vendors            → { employees } (for the new-vendor form)
+// GET /api/expenses-vendors?id=123      → { vendor, employees }
 export const GET: APIRoute = async ({ url, locals }) => {
   if (!canAccessExpenses(locals)) return new Response('Forbidden', { status: 403 });
-  const id = Number(url.searchParams.get('id'));
-  if (!Number.isInteger(id)) return new Response('id required', { status: 400 });
-  const [{ data: vendor }, { data: employees }] = await Promise.all([
-    supabase
-      .from('expenses_vendors')
-      .select('vendor_id, name, person_employee_id, description, frequency, status, group_name, latest_update, to_do, review_again, tags, aliases, report_matches')
-      .eq('vendor_id', id)
-      .maybeSingle(),
-    supabase.from('employees').select('id, full_name').order('full_name'),
-  ]);
+  const idRaw = url.searchParams.get('id');
+  const { data: employees } = await supabase
+    .from('employees').select('id, full_name').order('full_name');
+  if (idRaw == null) {
+    return new Response(JSON.stringify({ employees: employees ?? [] }), {
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+  const id = Number(idRaw);
+  if (!Number.isInteger(id)) return new Response('bad id', { status: 400 });
+  const { data: vendor } = await supabase
+    .from('expenses_vendors')
+    .select('vendor_id, name, person_employee_id, description, frequency, status, group_name, latest_update, to_do, review_again, tags, aliases, report_matches')
+    .eq('vendor_id', id)
+    .maybeSingle();
   if (!vendor) return new Response('Not found', { status: 404 });
   return new Response(JSON.stringify({ vendor, employees: employees ?? [] }), {
     headers: { 'content-type': 'application/json' },

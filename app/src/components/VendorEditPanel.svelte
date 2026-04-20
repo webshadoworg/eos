@@ -25,11 +25,31 @@
   let vendor = $state<Vendor | null>(null);
   let employees = $state<Employee[]>([]);
   let err = $state<string | null>(null);
+  let mode = $state<'edit' | 'new'>('edit');
 
-  async function load(id: number) {
+  function emptyVendor(name: string): Vendor {
+    return {
+      vendor_id: 0,
+      name,
+      person_employee_id: null,
+      description: null,
+      frequency: null,
+      status: null,
+      group_name: null,
+      latest_update: null,
+      to_do: null,
+      review_again: null,
+      tags: [],
+      aliases: [],
+      report_matches: [name],
+    };
+  }
+
+  async function loadEdit(id: number) {
     loading = true;
     err = null;
     vendor = null;
+    mode = 'edit';
     const res = await fetch(`/api/expenses-vendors?id=${id}`);
     if (res.ok) {
       const json = await res.json();
@@ -41,17 +61,38 @@
     loading = false;
   }
 
+  async function loadNew(name: string) {
+    loading = true;
+    err = null;
+    vendor = null;
+    mode = 'new';
+    const res = await fetch('/api/expenses-vendors');
+    if (res.ok) {
+      const json = await res.json();
+      employees = json.employees;
+      vendor = emptyVendor(name);
+    } else {
+      err = await res.text() || 'Failed to initialize form.';
+    }
+    loading = false;
+  }
+
   function close() {
     open = false;
     vendor = null;
     err = null;
+    mode = 'edit';
   }
 
   function onOpen(e: Event) {
-    const detail = (e as CustomEvent).detail as { vendor_id: number };
-    if (!detail?.vendor_id) return;
-    open = true;
-    load(detail.vendor_id);
+    const detail = (e as CustomEvent).detail as { vendor_id?: number; name?: string };
+    if (detail?.vendor_id) {
+      open = true;
+      loadEdit(detail.vendor_id);
+    } else if (detail?.name) {
+      open = true;
+      loadNew(detail.name);
+    }
   }
 
   onMount(() => {
@@ -69,13 +110,23 @@
     saving = true;
     err = null;
     const form = new FormData(e.currentTarget as HTMLFormElement);
-    form.set('_action', 'update');
-    form.set('vendor_id', String(vendor.vendor_id));
+    form.set('_action', mode === 'new' ? 'create' : 'update');
+    if (mode === 'edit') form.set('vendor_id', String(vendor.vendor_id));
     form.set('ajax', '1');
     const res = await fetch('/api/expenses-vendors', { method: 'POST', body: form });
     if (res.ok) {
+      // The duplicate-name case returns 200 with { duplicate, vendor_id };
+      // everything else returns 204.
+      if (res.status === 200) {
+        const json = await res.json().catch(() => null);
+        if (json?.duplicate && json?.vendor_id) {
+          await loadEdit(json.vendor_id);
+          err = 'A vendor with that name already exists — editing it instead.';
+          saving = false;
+          return;
+        }
+      }
       close();
-      // Reload the page so vendor-driven rollups/tooltips pick up the edits.
       location.reload();
     } else {
       err = await res.text() || 'Save failed.';
@@ -117,7 +168,7 @@
       <div class="p-6 space-y-5">
         <div class="flex items-center justify-between">
           <h2 class="text-xl font-semibold text-stone-900">
-            {vendor ? `Edit ${vendor.name}` : 'Loading…'}
+            {loading ? 'Loading…' : (mode === 'new' ? 'New vendor' : `Edit ${vendor?.name ?? ''}`)}
           </h2>
           <button type="button" onclick={close} class="p-1 text-stone-400 hover:text-stone-700" aria-label="Close">
             <X size={20} />
@@ -221,17 +272,19 @@
 
             <button type="submit" disabled={saving}
               class="w-full bg-purple-600 hover:bg-purple-700 text-white rounded-lg py-2.5 text-sm font-medium disabled:opacity-60">
-              {saving ? 'Saving…' : 'Save changes'}
+              {saving ? 'Saving…' : (mode === 'new' ? 'Create vendor' : 'Save changes')}
             </button>
           </form>
 
-          <button
-            type="button"
-            onclick={del}
-            class="w-full border border-rose-300 text-rose-700 rounded-lg py-2 text-sm font-medium flex items-center justify-center gap-2 hover:bg-rose-50"
-          >
-            <Trash2 size={14} /> Delete vendor
-          </button>
+          {#if mode === 'edit'}
+            <button
+              type="button"
+              onclick={del}
+              class="w-full border border-rose-300 text-rose-700 rounded-lg py-2 text-sm font-medium flex items-center justify-center gap-2 hover:bg-rose-50"
+            >
+              <Trash2 size={14} /> Delete vendor
+            </button>
+          {/if}
         {/if}
       </div>
     </aside>

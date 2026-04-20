@@ -358,7 +358,8 @@ const fmtMonthLabel = (m: string) => {
           .map(([name, amt]) => (
             <a
               href={`/expenses/vendors?new=1&name=${encodeURIComponent(name)}`}
-              class="hover:text-amber-900 underline underline-offset-2 decoration-amber-300 hover:decoration-amber-700"
+              data-vendor-new-name={name}
+              class="vendor-new-trigger hover:text-amber-900 underline underline-offset-2 decoration-amber-300 hover:decoration-amber-700"
             >
               {name} <span class="text-amber-500">({fmtMoney(amt)})</span>
             </a>
@@ -417,7 +418,8 @@ const fmtMonthLabel = (m: string) => {
                     {!v.matched && (
                       <a
                         href={`/expenses/vendors?new=1&name=${encodeURIComponent(v.canonical)}`}
-                        class="inline-block text-[11px] text-amber-600 hover:text-amber-800 underline underline-offset-2 decoration-amber-300 hover:decoration-amber-600 mt-0.5"
+                        data-vendor-new-name={v.canonical}
+                        class="vendor-new-trigger inline-block text-[11px] text-amber-600 hover:text-amber-800 underline underline-offset-2 decoration-amber-300 hover:decoration-amber-600 mt-0.5"
                       >
                         unmatched · click to add
                       </a>
@@ -540,7 +542,8 @@ const fmtMonthLabel = (m: string) => {
                   {!c.matched && (
                     <a
                       href={`/expenses/vendors?new=1&name=${encodeURIComponent(c.canonical)}`}
-                      class="inline-block text-[11px] text-amber-600 hover:text-amber-800 underline underline-offset-2 decoration-amber-300 hover:decoration-amber-600 mt-0.5"
+                      data-vendor-new-name={c.canonical}
+                      class="vendor-new-trigger inline-block text-[11px] text-amber-600 hover:text-amber-800 underline underline-offset-2 decoration-amber-300 hover:decoration-amber-600 mt-0.5"
                     >
                       unmatched · click to add
                     </a>
@@ -589,17 +592,29 @@ const fmtMonthLabel = (m: string) => {
   <VendorEditPanel client:load />
 
   <script is:inline>
-    // Intercept info-icon clicks so editing a matched vendor happens in a
-    // side panel on the current page instead of navigating to /expenses/vendors.
+    // Intercept info-icon and "unmatched · click to add" clicks so vendor
+    // edits happen in a side panel on the current page instead of navigating
+    // away to /expenses/vendors.
     document.addEventListener('click', (e) => {
       const target = e.target instanceof Element ? e.target : null;
       if (!target) return;
-      const trigger = target.closest('.vendor-info-trigger');
-      if (!trigger) return;
-      const vid = Number(trigger.getAttribute('data-vendor-id'));
-      if (!Number.isInteger(vid) || vid <= 0) return;
-      e.preventDefault();
-      window.dispatchEvent(new CustomEvent('open-vendor-edit', { detail: { vendor_id: vid } }));
+      const editTrigger = target.closest('.vendor-info-trigger');
+      if (editTrigger) {
+        const vid = Number(editTrigger.getAttribute('data-vendor-id'));
+        if (Number.isInteger(vid) && vid > 0) {
+          e.preventDefault();
+          window.dispatchEvent(new CustomEvent('open-vendor-edit', { detail: { vendor_id: vid } }));
+          return;
+        }
+      }
+      const newTrigger = target.closest('.vendor-new-trigger');
+      if (newTrigger) {
+        const name = newTrigger.getAttribute('data-vendor-new-name') ?? '';
+        if (name) {
+          e.preventDefault();
+          window.dispatchEvent(new CustomEvent('open-vendor-edit', { detail: { name } }));
+        }
+      }
     });
   </script>
 </AppLayout>
