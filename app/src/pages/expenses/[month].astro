@@ -1,6 +1,7 @@
 ---
 import AppLayout from '~/layouts/AppLayout.astro';
 import ExpenseStatusPicker from '~/components/ExpenseStatusPicker.svelte';
+import ExpenseNotes from '~/components/ExpenseNotes.svelte';
 import { Wallet, ArrowLeft, Calendar, TrendingUp, CreditCard, X, Check, CircleHelp, Circle, ArrowRightLeft } from 'lucide-svelte';
 import { supabase } from '~/lib/supabase';
 import { resolveMethodFilter } from '~/lib/expense-method';
@@ -55,6 +56,21 @@ const [{ data: expenses }, { data: vendors }, { data: methods }] = await Promise
 if (!expenses) {
   return new Response(`No expenses for ${month}`, { status: 404 });
 }
+
+// Note counts per expense_id for the charges showing in this view.
+const noteCounts = new Map<number, number>();
+const expenseIds = (expenses as any[]).map((e) => e.expense_id);
+if (expenseIds.length > 0) {
+  const { data: noteRows } = await supabase
+    .from('expense_notes')
+    .select('expense_id')
+    .in('expense_id', expenseIds);
+  for (const row of (noteRows ?? []) as { expense_id: number }[]) {
+    noteCounts.set(row.expense_id, (noteCounts.get(row.expense_id) ?? 0) + 1);
+  }
+}
+
+const currentEmployeeId = Astro.locals.user?.employeeId ?? '';
 
 type Expense = {
   expense_id: number;
@@ -410,12 +426,14 @@ const pct = (n: number) => ((n / total) * 100).toFixed(1) + '%';
             <th class="text-left font-medium px-3 py-2.5">Vendor</th>
             <th class="text-left font-medium px-3 py-2.5 w-28">Method</th>
             <th class="text-right font-medium px-3 py-2.5 w-32">Amount</th>
+            <th class="text-center font-medium px-2 py-2.5 w-12">Notes</th>
             <th class="text-right font-medium px-5 py-2.5 w-36">Status</th>
           </tr>
         </thead>
         <tbody>
           {enriched.map((c) => {
             const meta = methodByName.get(c.method);
+            const noteCount = noteCounts.get(c.expense_id) ?? 0;
             return (
               <tr class="border-t border-stone-100 hover:bg-stone-50/60">
                 <td class="px-5 py-2.5 text-stone-500 whitespace-nowrap">{fmtDate(c.date)}</td>
@@ -443,6 +461,14 @@ const pct = (n: number) => ((n / total) * 100).toFixed(1) + '%';
                 </td>
                 <td class="px-3 py-2.5 text-right font-medium text-stone-900 tabular-nums">
                   {fmtMoney(Number(c.amount))}
+                </td>
+                <td class="px-2 py-2.5 text-center">
+                  <ExpenseNotes
+                    client:load
+                    expenseId={c.expense_id}
+                    initialCount={noteCount}
+                    currentEmployeeId={currentEmployeeId}
+                  />
                 </td>
                 <td class="px-5 py-2.5 text-right">
                   <ExpenseStatusPicker
