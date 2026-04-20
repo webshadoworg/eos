@@ -39,23 +39,26 @@ const [
     .order('name'),
 ]);
 
-// Per-card: latest month, charge count, total, unreviewed count across ALL
-// months (so older unreviewed charges don't get forgotten), plus the month
-// we should deep-link to.
+// Per-card summary: all months that have charges, with a per-month breakdown
+// of status counts so card owners can see everything they need to act on at
+// a glance. Months with pending items (none / to_review) are surfaced as
+// individual links; settled months stay out of the way.
+type MonthBucket = {
+  month: string;
+  total: number;
+  count: number;
+  none: number;
+  toReview: number;
+  toMove: number;
+};
 type CardSummary = {
   name: string;
   label: string | null;
-  latestMonth: string | null;
-  linkMonth: string | null;
-  linkStatus: 'none' | 'to_review' | null;
-  unreviewed: number;
-  unreviewedLatest: number;
-  total: number;
-  count: number;
+  months: MonthBucket[];
+  pendingTotal: number;
 };
 // "Needs attention" = anything the reviewer hasn't settled yet: 'none'
 // (untouched) or 'to_review' (flagged for further investigation).
-const NEEDS_REVIEW = new Set(['none', 'to_review']);
 const cardSummaries: CardSummary[] = [];
 if (ownedMethods && ownedMethods.length > 0) {
   const methodNames = ownedMethods.map((m: any) => m.name);
@@ -65,37 +68,21 @@ if (ownedMethods && ownedMethods.length > 0) {
     .in('method', methodNames);
   for (const m of ownedMethods as { name: string; label: string | null }[]) {
     const rows = (myCharges ?? []).filter((c: any) => c.method === m.name);
-    if (rows.length === 0) {
-      cardSummaries.push({ name: m.name, label: m.label, latestMonth: null, linkMonth: null, linkStatus: null, unreviewed: 0, unreviewedLatest: 0, total: 0, count: 0 });
-      continue;
+    const byMonth = new Map<string, MonthBucket>();
+    for (const r of rows) {
+      if (!byMonth.has(r.month)) {
+        byMonth.set(r.month, { month: r.month, total: 0, count: 0, none: 0, toReview: 0, toMove: 0 });
+      }
+      const b = byMonth.get(r.month)!;
+      b.count += 1;
+      b.total += Number(r.amount) || 0;
+      if (r.status === 'none') b.none += 1;
+      else if (r.status === 'to_review') b.toReview += 1;
+      else if (r.status === 'to_move') b.toMove += 1;
     }
-    const latestMonth = rows.reduce((a: string, c: any) => (c.month > a ? c.month : a), rows[0].month);
-    const latestRows = rows.filter((c: any) => c.month === latestMonth);
-    const pending = rows.filter((c: any) => NEEDS_REVIEW.has(c.status));
-    // Deep-link to the most recent month that has anything pending. If only
-    // one status kind exists there, pre-filter the page to it; if both, no
-    // status filter so the user can see them stacked.
-    let linkMonth = latestMonth;
-    let linkStatus: 'none' | 'to_review' | null = null;
-    if (pending.length > 0) {
-      linkMonth = pending.reduce((a: string, c: any) => (c.month > a ? c.month : a), pending[0].month);
-      const atLink = pending.filter((c: any) => c.month === linkMonth);
-      const hasNone = atLink.some((c: any) => c.status === 'none');
-      const hasReview = atLink.some((c: any) => c.status === 'to_review');
-      if (hasNone && !hasReview) linkStatus = 'none';
-      else if (hasReview && !hasNone) linkStatus = 'to_review';
-    }
-    cardSummaries.push({
-      name: m.name,
-      label: m.label,
-      latestMonth,
-      linkMonth,
-      linkStatus,
-      unreviewed: pending.length,
-      unreviewedLatest: latestRows.filter((c: any) => NEEDS_REVIEW.has(c.status)).length,
-      total: latestRows.reduce((s: number, c: any) => s + (Number(c.amount) || 0), 0),
-      count: latestRows.length,
-    });
+    const months = Array.from(byMonth.values()).sort((a, b) => b.month.localeCompare(a.month));
+    const pendingTotal = months.reduce((s, b) => s + b.none + b.toReview, 0);
+    cardSummaries.push({ name: m.name, label: m.label, months, pendingTotal });
   }
 }
 const fmtMoney = (n: number) =>
@@ -154,56 +141,85 @@ const firstName = user.fullName?.split(' ')[0] || 'there';
           <h2 class="text-lg font-semibold text-stone-900">Your Cards</h2>
         </div>
       </div>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {cardSummaries.map((c) => {
-          const targetMonth = c.linkMonth ?? c.latestMonth;
-          const href = targetMonth
-            ? `/expenses/${targetMonth}?method=${encodeURIComponent(c.name)}${c.linkStatus ? `&status=${c.linkStatus}` : ''}`
-            : null;
-          const cardClass = 'group bg-white border border-stone-200 rounded-2xl px-5 py-4 flex items-center justify-between transition' +
-            (href ? ' hover:border-emerald-300 hover:shadow-sm' : ' opacity-70');
-          const olderCount = c.unreviewed - c.unreviewedLatest;
-          const inner = (
-            <>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {cardSummaries.map((c) => (
+          <div class="bg-white border border-stone-200 rounded-2xl overflow-hidden">
+            <div class="px-5 py-3 border-b border-stone-100 flex items-center justify-between gap-3">
               <div class="flex items-center gap-3 min-w-0">
-                <div class="w-10 h-10 rounded-lg bg-emerald-50 text-emerald-700 grid place-items-center shrink-0">
-                  <CreditCard size={18} />
+                <div class="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-700 grid place-items-center shrink-0">
+                  <CreditCard size={16} />
                 </div>
                 <div class="min-w-0">
                   <div class="flex items-center gap-2">
                     <span class="font-mono text-sm font-semibold text-stone-900">{c.name}</span>
                     {c.label && <span class="text-sm text-stone-500 truncate">· {c.label}</span>}
                   </div>
-                  <div class="text-xs text-stone-500 mt-0.5">
-                    {c.latestMonth ? (
-                      <>
-                        {fmtMonth(c.latestMonth)} · {c.count} {c.count === 1 ? 'charge' : 'charges'} · {fmtMoney(c.total)}
-                      </>
-                    ) : (
-                      'No charges yet'
-                    )}
+                  <div class="text-[11px] text-stone-400 mt-0.5">
+                    {c.pendingTotal > 0
+                      ? <>{c.pendingTotal} charge{c.pendingTotal === 1 ? '' : 's'} need your attention</>
+                      : 'All caught up'}
                   </div>
                 </div>
               </div>
-              <div class="flex items-center gap-3 shrink-0">
-                {c.unreviewed > 0 && (
-                  <span
-                    class="inline-flex items-center gap-1 text-xs font-medium bg-amber-50 border border-amber-200 text-amber-700 rounded-full px-2.5 py-1"
-                    title={olderCount > 0 ? `${c.unreviewedLatest} in ${fmtMonth(c.latestMonth!)} · ${olderCount} in earlier months` : undefined}
-                  >
-                    {c.unreviewed} to review{olderCount > 0 ? ' (incl. older)' : ''}
-                  </span>
-                )}
-                {href && <ArrowRight size={16} class="text-stone-300 group-hover:text-emerald-600 transition" />}
+              {c.pendingTotal === 0 && (
+                <span class="text-[11px] font-medium bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full px-2.5 py-1">
+                  ✓ clear
+                </span>
+              )}
+            </div>
+            {c.months.length === 0 ? (
+              <div class="px-5 py-6 text-sm text-stone-400 text-center">No charges yet.</div>
+            ) : (
+              <div class="divide-y divide-stone-100">
+                {c.months.map((b) => {
+                  const pending = b.none + b.toReview;
+                  const href = pending > 0
+                    ? (b.none > 0 && b.toReview === 0
+                        ? `/expenses/${b.month}?method=${encodeURIComponent(c.name)}&status=none`
+                        : b.toReview > 0 && b.none === 0
+                          ? `/expenses/${b.month}?method=${encodeURIComponent(c.name)}&status=to_review`
+                          : `/expenses/${b.month}?method=${encodeURIComponent(c.name)}`)
+                    : `/expenses/${b.month}?method=${encodeURIComponent(c.name)}`;
+                  return (
+                    <a
+                      href={href}
+                      class={`group flex items-center justify-between gap-3 px-5 py-2.5 hover:bg-stone-50 transition ${pending > 0 ? 'bg-amber-50/40' : ''}`}
+                    >
+                      <div class="flex items-center gap-3 min-w-0">
+                        <Calendar size={14} class="text-stone-400 shrink-0" />
+                        <div class="min-w-0">
+                          <div class="text-sm font-medium text-stone-900">{fmtMonth(b.month)}</div>
+                          <div class="text-[11px] text-stone-500">{b.count} charges · {fmtMoney(b.total)}</div>
+                        </div>
+                      </div>
+                      <div class="flex items-center gap-1.5 shrink-0 text-[11px] font-medium">
+                        {b.none > 0 && (
+                          <span class="bg-stone-100 text-stone-700 rounded-full px-2 py-0.5" title="Unreviewed">
+                            {b.none} new
+                          </span>
+                        )}
+                        {b.toReview > 0 && (
+                          <span class="bg-amber-100 text-amber-700 rounded-full px-2 py-0.5" title="Flagged for further review">
+                            {b.toReview} flagged
+                          </span>
+                        )}
+                        {b.toMove > 0 && (
+                          <span class="bg-sky-100 text-sky-700 rounded-full px-2 py-0.5" title="Flagged to move to another card">
+                            {b.toMove} to move
+                          </span>
+                        )}
+                        {pending === 0 && b.toMove === 0 && (
+                          <span class="text-stone-300">—</span>
+                        )}
+                        <ArrowRight size={14} class="text-stone-300 group-hover:text-emerald-600 transition ml-0.5" />
+                      </div>
+                    </a>
+                  );
+                })}
               </div>
-            </>
-          );
-          return href ? (
-            <a href={href} class={cardClass}>{inner}</a>
-          ) : (
-            <div class={cardClass}>{inner}</div>
-          );
-        })}
+            )}
+          </div>
+        ))}
       </div>
     </section>
   )}
