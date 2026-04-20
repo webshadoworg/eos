@@ -1,11 +1,12 @@
 ---
 import AppLayout from '~/layouts/AppLayout.astro';
-import { Target, AlertCircle, ListTodo, Users, ArrowRight, Megaphone, Calendar, Plane, MapPin } from 'lucide-svelte';
+import { Target, AlertCircle, ListTodo, Users, ArrowRight, Megaphone, Calendar, Plane, MapPin, CreditCard } from 'lucide-svelte';
 import { supabase } from '~/lib/supabase';
 const team = Astro.locals.currentTeam;
 const teamFilter = (q: any) => (team ? q.eq('team_id', team.id) : q);
 
 const today = new Date().toISOString().slice(0, 10);
+const currentEmployeeId = Astro.locals.user?.employeeId ?? '';
 
 const [
   { count: rocksCount },
@@ -14,6 +15,7 @@ const [
   { count: employeesCount },
   { data: posts },
   { data: upcomingTrips },
+  { data: ownedMethods },
 ] = await Promise.all([
   supabase.from('rocks').select('*', { count: 'exact', head: true }).eq('is_archived', false),
   teamFilter(supabase.from('todos').select('*', { count: 'exact', head: true }).eq('status', 'open')),
@@ -30,7 +32,55 @@ const [
     .or(`start_date.gte.${today},end_date.gte.${today}`)
     .order('start_date', { ascending: true, nullsFirst: false })
     .limit(5),
+  supabase
+    .from('expense_methods')
+    .select('name, label')
+    .eq('employee_id', currentEmployeeId)
+    .order('name'),
 ]);
+
+// Per-card: latest month, charge count, total, unreviewed count.
+type CardSummary = {
+  name: string;
+  label: string | null;
+  latestMonth: string | null;
+  unreviewed: number;
+  total: number;
+  count: number;
+};
+const cardSummaries: CardSummary[] = [];
+if (ownedMethods && ownedMethods.length > 0) {
+  const methodNames = ownedMethods.map((m: any) => m.name);
+  const { data: myCharges } = await supabase
+    .from('expenses')
+    .select('method, month, amount, status')
+    .in('method', methodNames);
+  for (const m of ownedMethods as { name: string; label: string | null }[]) {
+    const rows = (myCharges ?? []).filter((c: any) => c.method === m.name);
+    if (rows.length === 0) {
+      cardSummaries.push({ name: m.name, label: m.label, latestMonth: null, unreviewed: 0, total: 0, count: 0 });
+      continue;
+    }
+    const latestMonth = rows.reduce((a: string, c: any) => (c.month > a ? c.month : a), rows[0].month);
+    const latestRows = rows.filter((c: any) => c.month === latestMonth);
+    cardSummaries.push({
+      name: m.name,
+      label: m.label,
+      latestMonth,
+      unreviewed: latestRows.filter((c: any) => c.status === 'none').length,
+      total: latestRows.reduce((s: number, c: any) => s + (Number(c.amount) || 0), 0),
+      count: latestRows.length,
+    });
+  }
+}
+const fmtMoney = (n: number) =>
+  '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtMonth = (m: string) => {
+  const [yyyy, mm] = m.split('-').map(Number);
+  return new Date(Date.UTC(yyyy, (mm ?? 1) - 1, 1)).toLocaleDateString('en-US', {
+    month: 'long', year: 'numeric', timeZone: 'UTC',
+  });
+};
 
 const fmtDate = (d: string | null) =>
   d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
@@ -70,6 +120,63 @@ const firstName = user.fullName?.split(' ')[0] || 'there';
       </a>
     ))}
   </div>
+
+  {cardSummaries.length > 0 && (
+    <section class="mb-10">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-2">
+          <CreditCard size={18} class="text-emerald-600" />
+          <h2 class="text-lg font-semibold text-stone-900">Your Cards</h2>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {cardSummaries.map((c) => {
+          const href = c.latestMonth
+            ? `/expenses/${c.latestMonth}?method=${encodeURIComponent(c.name)}`
+            : null;
+          const cardClass = 'group bg-white border border-stone-200 rounded-2xl px-5 py-4 flex items-center justify-between transition' +
+            (href ? ' hover:border-emerald-300 hover:shadow-sm' : ' opacity-70');
+          const inner = (
+            <>
+              <div class="flex items-center gap-3 min-w-0">
+                <div class="w-10 h-10 rounded-lg bg-emerald-50 text-emerald-700 grid place-items-center shrink-0">
+                  <CreditCard size={18} />
+                </div>
+                <div class="min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="font-mono text-sm font-semibold text-stone-900">{c.name}</span>
+                    {c.label && <span class="text-sm text-stone-500 truncate">· {c.label}</span>}
+                  </div>
+                  <div class="text-xs text-stone-500 mt-0.5">
+                    {c.latestMonth ? (
+                      <>
+                        {fmtMonth(c.latestMonth)} · {c.count} {c.count === 1 ? 'charge' : 'charges'} · {fmtMoney(c.total)}
+                      </>
+                    ) : (
+                      'No charges yet'
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div class="flex items-center gap-3 shrink-0">
+                {c.unreviewed > 0 && (
+                  <span class="inline-flex items-center gap-1 text-xs font-medium bg-amber-50 border border-amber-200 text-amber-700 rounded-full px-2.5 py-1">
+                    {c.unreviewed} to review
+                  </span>
+                )}
+                {href && <ArrowRight size={16} class="text-stone-300 group-hover:text-emerald-600 transition" />}
+              </div>
+            </>
+          );
+          return href ? (
+            <a href={href} class={cardClass}>{inner}</a>
+          ) : (
+            <div class={cardClass}>{inner}</div>
+          );
+        })}
+      </div>
+    </section>
+  )}
 
   {upcomingTrips && upcomingTrips.length > 0 && (
     <section class="mb-10">

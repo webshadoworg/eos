@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '~/lib/supabase';
-import { canAccessExpenses } from '~/lib/permissions';
+import { canMutateExpenses } from '~/lib/permissions';
 
 const ALLOWED_STATUSES = new Set(['none', 'good', 'to_review', 'cancelled', 'to_move']);
 
@@ -9,7 +9,6 @@ const ALLOWED_STATUSES = new Set(['none', 'good', 'to_review', 'cancelled', 'to_
 //   bulk:   { ids: [...], status, move_to_method? }
 // move_to_method is kept when status='to_move' and cleared on any other status.
 export const PATCH: APIRoute = async ({ request, locals }) => {
-  if (!canAccessExpenses(locals)) return new Response('Forbidden', { status: 403 });
   const body = await request.json();
   const { id, ids, status, move_to_method } = body ?? {};
 
@@ -28,13 +27,17 @@ export const PATCH: APIRoute = async ({ request, locals }) => {
   if (Array.isArray(ids) && ids.length > 0) {
     const cleanIds = ids.filter((v) => Number.isInteger(v));
     if (cleanIds.length === 0) return new Response('no valid ids', { status: 400 });
+    if (!(await canMutateExpenses(locals, cleanIds))) return new Response('Forbidden', { status: 403 });
     const { error } = await supabase.from('expenses').update(patch).in('expense_id', cleanIds);
     if (error) return new Response(error.message, { status: 500 });
     return new Response(null, { status: 204 });
   }
 
   if (id != null) {
-    const { error } = await supabase.from('expenses').update(patch).eq('expense_id', id);
+    const numId = Number(id);
+    if (!Number.isInteger(numId)) return new Response('bad id', { status: 400 });
+    if (!(await canMutateExpenses(locals, [numId]))) return new Response('Forbidden', { status: 403 });
+    const { error } = await supabase.from('expenses').update(patch).eq('expense_id', numId);
     if (error) return new Response(error.message, { status: 500 });
     return new Response(null, { status: 204 });
   }

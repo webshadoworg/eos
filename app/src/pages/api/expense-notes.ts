@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '~/lib/supabase';
-import { canAccessExpenses } from '~/lib/permissions';
+import { canMutateExpenses } from '~/lib/permissions';
 
 type NoteRow = {
   id: string;
@@ -27,9 +27,9 @@ function shapeNote(n: NoteRow) {
 
 // GET /api/expense-notes?expense_id=123
 export const GET: APIRoute = async ({ url, locals }) => {
-  if (!canAccessExpenses(locals)) return new Response('Forbidden', { status: 403 });
   const expenseId = Number(url.searchParams.get('expense_id'));
   if (!Number.isInteger(expenseId)) return new Response('expense_id required', { status: 400 });
+  if (!(await canMutateExpenses(locals, [expenseId]))) return new Response('Forbidden', { status: 403 });
 
   const { data, error } = await supabase
     .from('expense_notes')
@@ -45,7 +45,6 @@ export const GET: APIRoute = async ({ url, locals }) => {
 
 // POST /api/expense-notes  { expense_id, body }
 export const POST: APIRoute = async ({ request, locals }) => {
-  if (!canAccessExpenses(locals)) return new Response('Forbidden', { status: 403 });
   const authorId = locals.user?.employeeId;
   if (!authorId) return new Response('No session', { status: 401 });
 
@@ -54,6 +53,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const body = String(payload?.body ?? '').trim();
   if (!Number.isInteger(expenseId)) return new Response('expense_id required', { status: 400 });
   if (!body) return new Response('body required', { status: 400 });
+  if (!(await canMutateExpenses(locals, [expenseId]))) return new Response('Forbidden', { status: 403 });
 
   const { data, error } = await supabase
     .from('expense_notes')
@@ -69,7 +69,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
 // PATCH /api/expense-notes  { id, body }  — author only
 export const PATCH: APIRoute = async ({ request, locals }) => {
-  if (!canAccessExpenses(locals)) return new Response('Forbidden', { status: 403 });
   const authorId = locals.user?.employeeId;
   if (!authorId) return new Response('No session', { status: 401 });
 
@@ -91,7 +90,6 @@ export const PATCH: APIRoute = async ({ request, locals }) => {
 
 // DELETE /api/expense-notes?id=xxx  — author only
 export const DELETE: APIRoute = async ({ url, locals }) => {
-  if (!canAccessExpenses(locals)) return new Response('Forbidden', { status: 403 });
   const authorId = locals.user?.employeeId;
   if (!authorId) return new Response('No session', { status: 401 });
 

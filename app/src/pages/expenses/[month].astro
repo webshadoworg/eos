@@ -5,16 +5,26 @@ import ExpenseNotes from '~/components/ExpenseNotes.svelte';
 import { Wallet, ArrowLeft, Calendar, TrendingUp, CreditCard, X, Check, CircleHelp, Circle, ArrowRightLeft } from 'lucide-svelte';
 import { supabase } from '~/lib/supabase';
 import { resolveMethodFilter } from '~/lib/expense-method';
-import { canAccessExpenses } from '~/lib/permissions';
-
-if (!canAccessExpenses(Astro.locals)) {
-  return new Response('Forbidden — Finance team members only', { status: 403 });
-}
+import { canAccessExpenses, getOwnedMethods } from '~/lib/permissions';
 
 const { month } = Astro.params;
 if (!month || !/^\d{4}-\d{2}$/.test(month)) return new Response('Invalid month', { status: 400 });
 
+const isFinance = canAccessExpenses(Astro.locals);
+const ownedMethods = isFinance ? [] : await getOwnedMethods(Astro.locals);
+if (!isFinance && ownedMethods.length === 0) {
+  return new Response('Forbidden — Finance team members only', { status: 403 });
+}
+
 const methodFilter = resolveMethodFilter(Astro.url, Astro.cookies);
+
+// Card owners who aren't on Finance are locked to their own method(s). If no
+// filter is set or the filter isn't one they own, redirect to the first one.
+if (!isFinance) {
+  if (!methodFilter || !ownedMethods.includes(methodFilter)) {
+    return Astro.redirect(`/expenses/${month}?method=${encodeURIComponent(ownedMethods[0])}`);
+  }
+}
 const statusFilter = Astro.url.searchParams.get('status') ?? 'all';
 
 // Counts for the filter chips — unaffected by the current status filter so
@@ -210,8 +220,8 @@ const fmtDate = (d: string) =>
 const pct = (n: number) => ((n / total) * 100).toFixed(1) + '%';
 ---
 <AppLayout title={`${label} Expenses · GYE EOS`}>
-  <a href="/expenses" class="inline-flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-900 mb-6">
-    <ArrowLeft size={16} /> Back to Expenses
+  <a href={isFinance ? '/expenses' : '/'} class="inline-flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-900 mb-6">
+    <ArrowLeft size={16} /> {isFinance ? 'Back to Expenses' : 'Back to Home'}
   </a>
 
   <header class="flex items-start justify-between mb-6">
@@ -238,12 +248,14 @@ const pct = (n: number) => ((n / total) * 100).toFixed(1) + '%';
         {activeMethodMeta?.label && <> · {activeMethodMeta.label}</>}
         {activeMethodMeta?.ownerName && <> · owned by <span class="font-medium">{activeMethodMeta.ownerName}</span></>}
       </div>
-      <a
-        href={`/expenses/${month}?method=all${statusFilter !== 'all' ? `&status=${statusFilter}` : ''}`}
-        class="inline-flex items-center gap-1 text-xs text-sky-700 hover:text-sky-900 font-medium"
-      >
-        <X size={13} /> Clear
-      </a>
+      {isFinance && (
+        <a
+          href={`/expenses/${month}?method=all${statusFilter !== 'all' ? `&status=${statusFilter}` : ''}`}
+          class="inline-flex items-center gap-1 text-xs text-sky-700 hover:text-sky-900 font-medium"
+        >
+          <X size={13} /> Clear
+        </a>
+      )}
     </div>
   )}
 
