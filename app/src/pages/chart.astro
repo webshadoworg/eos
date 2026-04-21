@@ -1,7 +1,7 @@
 ---
 import AppLayout from '~/layouts/AppLayout.astro';
 import SeatNode from '~/components/SeatNode.astro';
-import { Network, X, Trash2 } from 'lucide-svelte';
+import { Network, X, Trash2, Download } from 'lucide-svelte';
 import { supabase } from '~/lib/supabase';
 
 const url = Astro.url;
@@ -59,6 +59,24 @@ function sortTree(s: Seat) {
 }
 if (root) sortTree(root);
 
+type SeatExport = {
+  title: string;
+  person: string | null;
+  email: string | null;
+  responsibilities: string[];
+  children: SeatExport[];
+};
+function toExport(s: Seat): SeatExport {
+  return {
+    title: s.title,
+    person: s.employee?.full_name ?? s.person_name ?? null,
+    email: s.employee?.email ?? null,
+    responsibilities: s.responsibilities,
+    children: s.children.map(toExport),
+  };
+}
+const exportTree: SeatExport | null = root ? toExport(root) : null;
+
 const editing = editId ? seatById.get(editId) ?? null : null;
 const addingUnder = addUnderId ? seatById.get(addUnderId) ?? null : null;
 
@@ -75,7 +93,21 @@ const back = '/chart';
         <p class="text-stone-500 text-sm">Map the roles and responsibilities for each seat in the organization.</p>
       </div>
     </div>
+    {exportTree && (
+      <button
+        id="export-chart-md"
+        type="button"
+        class="border border-stone-300 bg-white hover:bg-stone-50 rounded-lg px-3 py-2 text-sm font-medium text-stone-700 flex items-center gap-1.5"
+      >
+        <Download size={14} />
+        Export as Markdown
+      </button>
+    )}
   </header>
+
+  {exportTree && (
+    <script id="chart-export-data" type="application/json" set:html={JSON.stringify(exportTree)} />
+  )}
 
   {root ? (
     <div class="overflow-x-auto pb-8">
@@ -161,6 +193,62 @@ const back = '/chart';
       </aside>
     </div>
   )}
+
+  <script is:inline>
+    (function () {
+      const btn = document.getElementById('export-chart-md');
+      const dataEl = document.getElementById('chart-export-data');
+      if (!btn || !dataEl) return;
+
+      let tree;
+      try { tree = JSON.parse(dataEl.textContent || 'null'); }
+      catch { return; }
+      if (!tree) return;
+
+      function seatMd(seat, depth, parentPath) {
+        // Root at h2, cap headings at h6 for deep trees.
+        const level = Math.min(depth + 2, 6);
+        const hashes = '#'.repeat(level);
+        const lines = [];
+        lines.push(hashes + ' ' + seat.title);
+        if (parentPath.length) {
+          lines.push('_Reports to: ' + parentPath.join(' → ') + '_');
+        }
+        if (seat.person) {
+          lines.push('**' + seat.person + '**' + (seat.email ? ' · `' + seat.email + '`' : ''));
+        } else {
+          lines.push('_Seat unfilled_');
+        }
+        if (seat.responsibilities && seat.responsibilities.length) {
+          lines.push('');
+          lines.push('Responsibilities:');
+          for (const r of seat.responsibilities) lines.push('- ' + r);
+        }
+        lines.push('');
+        const childPath = parentPath.concat([seat.title]);
+        for (const c of seat.children) lines.push(seatMd(c, depth + 1, childPath));
+        return lines.join('\n');
+      }
+
+      btn.addEventListener('click', function () {
+        const today = new Date().toISOString().slice(0, 10);
+        const md =
+          '# Accountability Chart\n' +
+          '_GYE EOS · Exported ' + today + '_\n\n' +
+          '---\n\n' +
+          seatMd(tree, 0, []);
+
+        const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'accountability-chart-' + today + '.md';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 0);
+      });
+    })();
+  </script>
 </AppLayout>
 
 <style is:global>
