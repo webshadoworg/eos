@@ -11,7 +11,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
   context.locals.currentTeam = null;
 
   const path = context.url.pathname;
-  const isPublic = PUBLIC_PATHS.has(path) || path.startsWith('/_');
+  const isPublic = PUBLIC_PATHS.has(path) || path.startsWith('/_') || path.startsWith('/docs');
   // Machine API has its own Bearer-token auth; skip the cookie-based gate.
   const isMachineApi = path.startsWith('/api/v1');
 

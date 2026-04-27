@@ -1,0 +1,38 @@
+---
+import '~/styles/global.css';
+import { Mountain } from 'lucide-svelte';
+
+interface Props {
+  title?: string;
+  frontmatter?: { title?: string };
+}
+const { title, frontmatter } = Astro.props as Props;
+const pageTitle = title ?? frontmatter?.title ?? 'Documentation · GYE EOS';
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>{pageTitle}</title>
+  </head>
+  <body class="min-h-screen bg-stone-50">
+    <header class="bg-white border-b border-stone-200 sticky top-0 z-20">
+      <div class="max-w-3xl mx-auto px-4 md:px-6 h-16 flex items-center">
+        <a href="/" class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-violet-600 grid place-items-center">
+            <Mountain size={18} class="text-white" />
+          </div>
+          <span class="font-semibold text-stone-900">GYE.org</span>
+        </a>
+        <span class="ml-3 text-stone-400 text-sm">/ Docs</span>
+      </div>
+    </header>
+    <main class="max-w-3xl mx-auto px-4 md:px-6 py-8 md:py-12">
+      <article class="prose prose-stone max-w-none prose-pre:bg-stone-900 prose-pre:text-stone-100 prose-code:before:content-none prose-code:after:content-none prose-headings:scroll-mt-20">
+        <slot />
+      </article>
+    </main>
+  </body>
+</html>

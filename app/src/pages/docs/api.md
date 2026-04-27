@@ -1,3 +1,8 @@
+---
+layout: ../../layouts/DocLayout.astro
+title: API · GYE EOS
+---
+
 # GYE EOS API — Third-Party Integration
 
 **Base URL:** `https://<your-deployment>/api/v1` (locally: `http://localhost:6133/api/v1`)
