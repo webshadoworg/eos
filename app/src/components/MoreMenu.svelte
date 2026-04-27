@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Settings, ListChecks, Contact, Newspaper, BookOpen, Users, Plane, Link2, Network, Wallet, Lightbulb } from 'lucide-svelte';
+  import { Settings, ListChecks, Contact, Newspaper, BookOpen, Users, Plane, Link2, Network, Wallet, Lightbulb, Code2 } from 'lucide-svelte';
 
   let { canSeeExpenses = false } = $props<{ canSeeExpenses?: boolean }>();
   let open = $state(false);
@@ -38,6 +38,8 @@
     { href: '/links',          label: 'Links',                 icon: Link2,       always: true },
     { href: '/trips',          label: 'Add a Trip',            icon: Plane,       always: true },
     { href: '/feature-ideas',  label: 'Feature Ideas',          icon: Lightbulb,   always: true },
+    { href: 'https://github.com/webshadoworg/eos/blob/main/docs/api.md',
+                               label: 'API Docs',              icon: Code2,       always: true, external: true },
   ];
   const items = $derived(allItems.filter((i) => i.always || (i.href === '/expenses' && canSeeExpenses)));
 </script>
@@ -63,6 +65,8 @@
           href={item.href}
           role="menuitem"
           onclick={close}
+          target={item.external ? '_blank' : undefined}
+          rel={item.external ? 'noopener noreferrer' : undefined}
           class="flex items-center gap-2.5 px-3 py-2 text-sm text-stone-700 hover:bg-stone-50 rounded-lg"
         >
           <item.icon size={15} class="text-stone-400" />
