@@ -1,14 +1,17 @@
 ---
 import AppLayout from '~/layouts/AppLayout.astro';
 import ScorecardCell from '~/components/ScorecardCell.svelte';
-import { ChartBar, Plus, ChevronLeft, ChevronRight, History } from 'lucide-svelte';
+import { ChartBar, Plus, ChevronLeft, ChevronRight, History, X, Trash2, Archive } from 'lucide-svelte';
 import { supabase } from '~/lib/supabase';
 const team = Astro.locals.currentTeam;
 if (!team) return Astro.redirect('/');
 
 const frequency = (Astro.url.searchParams.get('freq') as 'weekly' | 'monthly') || 'weekly';
 const offset = parseInt(Astro.url.searchParams.get('offset') || '0', 10);
+const addingMeasurable = Astro.url.searchParams.get('add_measurable') === '1';
+const editMeasurableId = Astro.url.searchParams.get('edit_measurable');
 const COLS = 5;
+const back = `/scorecard?freq=${frequency}${offset ? `&offset=${offset}` : ''}`;
 
 // ----- date columns -----
 function startOfWeek(d: Date) {
@@ -96,6 +99,30 @@ for (const v of values ?? []) {
   cellMap.set(row.measurable_id, m);
 }
 
+// employees for owner picker (only when the panel is open)
+const panelOpen = addingMeasurable || !!editMeasurableId;
+const { data: employees } = panelOpen
+  ? await supabase.from('employees').select('id, full_name').order('full_name')
+  : { data: [] as { id: string; full_name: string }[] };
+
+// existing groups/subgroups across this team's measurables for quick re-use
+const knownGroups = Array.from(new Set((measurables ?? []).map((m) => m.group).filter(Boolean) as string[]));
+const knownSubgroups = Array.from(new Set((measurables ?? []).map((m) => m.subgroup).filter(Boolean) as string[]));
+
+const editingMeasurable = editMeasurableId
+  ? (measurables ?? []).find((m) => m.id === editMeasurableId) ?? null
+  : null;
+// If the user navigated to edit a measurable from a different frequency view, fetch it directly.
+let loadedMeasurable: any = editingMeasurable;
+if (editMeasurableId && !loadedMeasurable) {
+  const { data } = await supabase
+    .from('measurables')
+    .select('id, name, team_id, group, subgroup, owner_employee_id, goal, value_type, threshold_type, frequency, show_average, display_order')
+    .eq('id', editMeasurableId)
+    .maybeSingle();
+  loadedMeasurable = data;
+}
+
 // group by group → subgroup → measurables
 type Row = (typeof measurables extends (infer U)[] | null ? U : never);
 const grouped = new Map<string, Map<string, Row[]>>();
@@ -137,10 +164,13 @@ function initials(name: string) {
         <p class="text-stone-500 text-sm">{team.name} measurables</p>
       </div>
     </div>
-    <button class="bg-stone-800 text-white rounded-xl px-5 py-2.5 text-sm font-medium flex items-center gap-1.5">
+    <a
+      href={`/scorecard?freq=${frequency}${offset ? `&offset=${offset}` : ''}&add_measurable=1`}
+      class="bg-stone-800 hover:bg-stone-900 text-white rounded-xl px-5 py-2.5 text-sm font-medium flex items-center gap-1.5"
+    >
       <Plus size={16} />
       Add Measurable
-    </button>
+    </a>
   </header>
 
   <div class="flex items-center justify-between mb-4">
@@ -213,10 +243,13 @@ function initials(name: string) {
                   return (
                     <tr class="border-t border-stone-100">
                       <td class="px-4 py-3">
-                        <div class="flex items-center gap-1.5 text-stone-800 font-medium">
+                        <a
+                          href={`/scorecard?freq=${frequency}${offset ? `&offset=${offset}` : ''}&edit_measurable=${m.id}`}
+                          class="flex items-center gap-1.5 text-stone-800 font-medium hover:text-violet-700"
+                        >
                           {m.name}
                           <History size={12} class="text-stone-300" />
-                        </div>
+                        </a>
                       </td>
                       <td class="px-3 py-3 text-center">
                         {m.owner ? (
@@ -270,4 +303,143 @@ function initials(name: string) {
       </tbody>
     </table>
   </div>
+
+  {(addingMeasurable || loadedMeasurable) && (
+    <div class="fixed inset-0 z-30">
+      <a href={back} class="absolute inset-0 bg-black/20"></a>
+      <aside class="absolute right-0 top-0 bottom-0 w-full max-w-md bg-white shadow-2xl overflow-y-auto">
+        <div class="p-6 space-y-5">
+          <div class="flex items-center justify-between">
+            <h2 class="text-xl font-semibold text-stone-900">{loadedMeasurable ? 'Edit Measurable' : 'Add Measurable'}</h2>
+            <a href={back} class="p-1 text-stone-400 hover:text-stone-700"><X size={18} /></a>
+          </div>
+
+          <form method="POST" action="/api/measurables" class="space-y-4">
+            <input type="hidden" name="_action" value={loadedMeasurable ? 'update' : 'create'} />
+            {loadedMeasurable && <input type="hidden" name="id" value={loadedMeasurable.id} />}
+            <input type="hidden" name="back" value={back} />
+
+            <div>
+              <label class="text-sm font-medium text-stone-700">Name</label>
+              <input type="text" name="name" required value={loadedMeasurable?.name ?? ''}
+                class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-400" />
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="text-sm font-medium text-stone-700">Frequency</label>
+                <select name="frequency" class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm">
+                  {(['weekly', 'monthly'] as const).map((f) => (
+                    <option value={f} selected={f === (loadedMeasurable?.frequency ?? frequency)}>
+                      {f === 'weekly' ? 'Weekly' : 'Monthly'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label class="text-sm font-medium text-stone-700">Owner</label>
+                <select name="owner_employee_id" class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm">
+                  <option value="">Unassigned</option>
+                  {employees?.map((e) => (
+                    <option value={e.id} selected={e.id === loadedMeasurable?.owner_employee_id}>{e.full_name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="text-sm font-medium text-stone-700">Goal</label>
+                <input type="text" name="goal" inputmode="decimal"
+                  value={loadedMeasurable?.goal ?? ''}
+                  class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-400" />
+              </div>
+              <div>
+                <label class="text-sm font-medium text-stone-700">Threshold</label>
+                <select name="threshold_type" class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm">
+                  {(['minimum', 'maximum'] as const).map((t) => (
+                    <option value={t} selected={t === (loadedMeasurable?.threshold_type ?? 'minimum')}>
+                      {t === 'minimum' ? 'At least (min)' : 'At most (max)'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label class="text-sm font-medium text-stone-700">Value type</label>
+              <select name="value_type" class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm">
+                {(['number', 'currency'] as const).map((v) => (
+                  <option value={v} selected={v === (loadedMeasurable?.value_type ?? 'number')}>
+                    {v === 'currency' ? 'Currency ($)' : 'Number'}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="text-sm font-medium text-stone-700">Group</label>
+                <input type="text" name="group" list="scorecard-groups"
+                  value={loadedMeasurable?.group ?? ''}
+                  placeholder="e.g. Revenue"
+                  class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-400" />
+                <datalist id="scorecard-groups">
+                  {knownGroups.map((g) => <option value={g} />)}
+                </datalist>
+              </div>
+              <div>
+                <label class="text-sm font-medium text-stone-700">Subgroup</label>
+                <input type="text" name="subgroup" list="scorecard-subgroups"
+                  value={loadedMeasurable?.subgroup ?? ''}
+                  placeholder="optional"
+                  class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-400" />
+                <datalist id="scorecard-subgroups">
+                  {knownSubgroups.map((sg) => <option value={sg} />)}
+                </datalist>
+              </div>
+            </div>
+
+            <label class="flex items-center gap-2 text-sm text-stone-700">
+              <input type="checkbox" name="show_average" checked={loadedMeasurable?.show_average ?? false} />
+              Show average in summary
+            </label>
+
+            <button class="w-full bg-violet-600 hover:bg-violet-700 text-white rounded-lg py-2.5 text-sm font-medium">
+              {loadedMeasurable ? 'Save changes' : 'Create measurable'}
+            </button>
+          </form>
+
+          {loadedMeasurable && (
+            <div class="pt-4 border-t border-stone-200 space-y-2">
+              <form
+                method="POST"
+                action="/api/measurables"
+                onsubmit="return confirm('Archive this measurable? Past values will be kept.');"
+              >
+                <input type="hidden" name="_action" value="archive" />
+                <input type="hidden" name="id" value={loadedMeasurable.id} />
+                <input type="hidden" name="back" value={back} />
+                <button class="w-full border border-stone-300 text-stone-700 rounded-lg py-2 text-sm font-medium flex items-center justify-center gap-2">
+                  <Archive size={14} /> Archive measurable
+                </button>
+              </form>
+              <form
+                method="POST"
+                action="/api/measurables"
+                onsubmit="return confirm('Permanently delete this measurable AND all its values? This cannot be undone.');"
+              >
+                <input type="hidden" name="_action" value="delete" />
+                <input type="hidden" name="id" value={loadedMeasurable.id} />
+                <input type="hidden" name="back" value={back} />
+                <button class="w-full border border-rose-300 text-rose-700 rounded-lg py-2 text-sm font-medium flex items-center justify-center gap-2">
+                  <Trash2 size={14} /> Delete permanently
+                </button>
+              </form>
+            </div>
+          )}
+        </div>
+      </aside>
+    </div>
+  )}
 </AppLayout>
