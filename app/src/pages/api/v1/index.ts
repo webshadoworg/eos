@@ -23,6 +23,8 @@ export const GET: APIRoute = async ({ request }) => {
       'GET /api/v1/feature-ideas':         'List feature ideas. Optional ?owner=<email>, ?status=, ?term=, ?tag=.',
       'POST /api/v1/feature-ideas':        'Create a feature idea. Body: { title, description?, owner_email?, term_type?, priority? (1-5), tags? (string[]) }. Returns { id }.',
       'PATCH /api/v1/feature-ideas':       'Update a feature idea. Body: { id, solved?, status?, tags? }.',
+      'GET /api/v1/measurables':          'List scorecard measurables. Optional ?team_id=, ?team_name=, ?owner=<email>, ?frequency=weekly|monthly, ?group=, ?include_archived=1, ?include_values=1, ?weeks=N (default 13), ?months=N (default 6), ?from=YYYY-MM-DD, ?to=YYYY-MM-DD.',
+      'PUT /api/v1/measurables':          'Upsert a weekly/monthly value. Body: { measurable_id, date (YYYY-MM-DD), value? (number|null), note?, frequency? (weekly|monthly, defaults to measurable\'s frequency) }. Empty value+note deletes the entry.',
       'GET /api/v1/vto':                  'Get the singleton V/TO (vision + traction + swot).',
     },
   });

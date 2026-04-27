@@ -30,6 +30,8 @@ Valid keys come from the `API_KEYS` environment variable on the server — a com
 | GET | `/api/v1/todos` | Optional `?assignee=<email>`, `?team_id=`, `?status=open\|done\|archived\|all` (default `open`). |
 | POST | `/api/v1/todos` | Create a todo. |
 | PATCH | `/api/v1/todos` | Mark a todo done/open. |
+| GET | `/api/v1/measurables` | List scorecard measurables, optionally with recent values inline. |
+| PUT | `/api/v1/measurables` | Upsert (or delete) a weekly/monthly value. |
 | GET | `/api/v1/vto` | Get the singleton V/TO (vision + traction + SWOT). |
 
 ### Write bodies
@@ -83,6 +85,85 @@ Returns `{ "id": "…" }`. New todos start in `open` status. `team_id` / `team_n
 
 `done` defaults to `true`.
 
+### Measurables (scorecard)
+
+`GET /api/v1/measurables` returns scorecard measurables — the per-team weekly or monthly metrics. By default it returns just the metric definitions (no historical values).
+
+**Query parameters**
+
+| Param | Purpose |
+|---|---|
+| `team_id` / `team_name` | Filter to one team (mutually exclusive). `team_name` is case-insensitive. |
+| `owner` (or `assignee`) | Filter by owner email. |
+| `frequency` | `weekly` or `monthly`. |
+| `group` | Filter by the `group` column (top-level category on the scorecard). |
+| `include_archived` | `1` to include archived measurables. |
+| `include_values` | `1` to include recent values inline on each measurable. |
+| `weeks` | When `include_values=1`, how many recent weeks to return (default `13`, max `260`). |
+| `months` | When `include_values=1`, how many recent months to return (default `6`, max `60`). |
+| `from`, `to` | `YYYY-MM-DD` window for `include_values`. Overrides `weeks`/`months`. Both inclusive; weekly uses `week_start_date` (Sunday), monthly uses `month_start_date` (1st). |
+
+**Response shape**
+
+```json
+{
+  "measurables": [
+    {
+      "id": "…",
+      "name": "Inbound calls",
+      "description": null,
+      "frequency": "weekly",
+      "goal": 25,
+      "value_type": "number",
+      "threshold_type": "minimum",
+      "group": "Sales",
+      "subgroup": null,
+      "display_order": 0,
+      "show_average": true,
+      "is_archived": false,
+      "created_at": "…",
+      "updated_at": "…",
+      "team": { "id": "…", "name": "Leadership" },
+      "owner": { "id": "…", "name": "Alice", "email": "alice@gye.org" },
+      "values": [
+        { "date": "2026-04-19", "value": 27, "note": null },
+        { "date": "2026-04-12", "value": 22, "note": "holiday week" }
+      ]
+    }
+  ],
+  "count": 1
+}
+```
+
+`values` is only present when `include_values=1`. Dates are `week_start_date` (Sunday) for weekly metrics or `month_start_date` (1st of the month) for monthly metrics, sorted newest first.
+
+**`PUT /api/v1/measurables`** — upsert a weekly or monthly value.
+
+```json
+{
+  "measurable_id": "…",
+  "date": "2026-04-19",
+  "value": 27,
+  "note": "optional",
+  "frequency": "weekly"
+}
+```
+
+- `measurable_id` and `date` are required. `date` must be `YYYY-MM-DD` and should be the period's start date — Sunday for weekly, the 1st for monthly. Other dates are stored verbatim.
+- `frequency` defaults to the measurable's own `frequency` and rarely needs to be set.
+- `value` may be `null` or omitted to clear just the numeric value while keeping a note.
+- If both `value` and `note` are empty/null, the entry for that period is **deleted**.
+
+Returns one of:
+
+```json
+{ "measurable_id": "…", "date": "2026-04-19", "frequency": "weekly", "value": 27, "note": null }
+```
+
+```json
+{ "measurable_id": "…", "date": "2026-04-19", "frequency": "weekly", "deleted": true }
+```
+
 ## Examples
 
 ```bash
@@ -104,6 +185,16 @@ curl -X PATCH https://your-host/api/v1/todos \
   -H "Authorization: Bearer $EOS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"id":"<todo-id>"}'
+
+# List one team's weekly measurables with the last 8 weeks of values
+curl -H "Authorization: Bearer $EOS_API_KEY" \
+  "https://your-host/api/v1/measurables?team_name=Leadership&frequency=weekly&include_values=1&weeks=8"
+
+# Record this week's value for a measurable
+curl -X PUT https://your-host/api/v1/measurables \
+  -H "Authorization: Bearer $EOS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"measurable_id":"<id>","date":"2026-04-19","value":27}'
 ```
 
 ## Error format
@@ -124,7 +215,7 @@ All errors are JSON:
 
 - Responses are pretty-printed JSON with `cache-control: no-store`.
 - `team_name` lookups are case-sensitive.
-- **Read-only resources** (no POST/PATCH/DELETE): employees, contacts, teams, rocks, V/TO.
+- **Read-only resources** (no POST/PATCH/DELETE): employees, contacts, teams, rocks, V/TO. Measurables are read-only for definitions, but `PUT` upserts a single weekly/monthly value.
 - **Posts** (the unified updates/testimonials entity) is not exposed on `/api/v1` yet. Open an issue if an integration needs it.
 
 ## Environment variables (server side)
