@@ -73,14 +73,14 @@ if (detailId) {
       .from('issue_shares')
       .select('team:teams(id, name)')
       .eq('issue_id', detailId);
-    detail = { ...ownedDetail, isSharedIssue: false, shares: (shares ?? []).map((s: any) => s.team).filter(Boolean) };
+    detail = { ...(ownedDetail as any), isSharedIssue: false, shares: (shares ?? []).map((s: any) => s.team).filter(Boolean) };
   } else if (sharedIds.includes(detailId)) {
     const { data } = await supabase
       .from('issues')
       .select(issueSelect + ', originTeam:teams!issues_team_id_fkey(id, name)')
       .eq('id', detailId)
       .maybeSingle();
-    if (data) detail = { ...data, isSharedIssue: true, shares: [] };
+    if (data) detail = { ...(data as any), isSharedIssue: true, shares: [] };
   }
 }
 
