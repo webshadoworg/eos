@@ -77,7 +77,7 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
 };
 
 // PATCH accepts a partial update; only whitelisted fields are applied.
-const TODO_PATCH_FIELDS = new Set(['status', 'description', 'title', 'is_urgent', 'due_date']);
+const TODO_PATCH_FIELDS = new Set(['status', 'description', 'title', 'is_urgent', 'due_date', 'team_id', 'assignee_employee_id']);
 
 export const PATCH: APIRoute = async ({ request, locals }) => {
   const body = await request.json();

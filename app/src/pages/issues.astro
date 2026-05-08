@@ -345,7 +345,8 @@ const backNoDetail = url.pathname + (url.search ? url.search.replace(/[?&]detail
                 </button>
               </div>
 
-              <form method="POST" action="/api/issues" class="space-y-4">
+              <form method="POST" action="/api/issues" class="space-y-4"
+                data-autosave-form data-autosave-url="/api/issues" data-autosave-id={detail.id}>
                 <input type="hidden" name="_action" value="update" />
                 <input type="hidden" name="id" value={detail.id} />
                 <input type="hidden" name="back" value={backNoDetail} />
@@ -353,6 +354,7 @@ const backNoDetail = url.pathname + (url.search ? url.search.replace(/[?&]detail
                 <div>
                   <label class="text-sm font-medium text-stone-700">Title</label>
                   <input type="text" name="title" value={detail.title}
+                    data-autosave="title"
                     class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-400" />
                 </div>
 
@@ -371,21 +373,21 @@ const backNoDetail = url.pathname + (url.search ? url.search.replace(/[?&]detail
 
                 <div>
                   <label class="text-sm font-medium text-stone-700">Priority</label>
-                  <select name="priority" class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm">
+                  <select name="priority" data-autosave="priority" class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm">
                     {[1, 2, 3, 4, 5].map((p) => <option value={p} selected={p === detail.priority}>P{p}</option>)}
                   </select>
                 </div>
 
                 <div>
                   <label class="text-sm font-medium text-stone-700">Team</label>
-                  <select name="team_id" class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm">
+                  <select name="team_id" data-autosave="team_id" class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm">
                     {teams.map((t) => <option value={t.id} selected={t.id === detail.team_id}>{t.name}</option>)}
                   </select>
                 </div>
 
                 <div>
                   <label class="text-sm font-medium text-stone-700">Owner</label>
-                  <select name="owner_employee_id" class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm">
+                  <select name="owner_employee_id" data-autosave="owner_employee_id" class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm">
                     <option value="">Unassigned</option>
                     {employees?.map((e) => <option value={e.id} selected={e.id === detail.owner_employee_id}>{e.full_name}</option>)}
                   </select>
@@ -393,12 +395,13 @@ const backNoDetail = url.pathname + (url.search ? url.search.replace(/[?&]detail
 
                 <div>
                   <label class="text-sm font-medium text-stone-700">Term</label>
-                  <select name="term_type" class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm">
+                  <select name="term_type" data-autosave="term_type" class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm">
                     <option value="short_term" selected={detail.term_type === 'short_term'}>Short term</option>
                     <option value="long_term" selected={detail.term_type === 'long_term'}>Long term</option>
                   </select>
                 </div>
 
+                <div id="field-autosave-status" class="text-xs h-4 text-right tabular-nums"></div>
                 <button class="w-full bg-violet-600 hover:bg-violet-700 text-white rounded-lg py-2.5 text-sm font-medium">
                   Save changes
                 </button>
@@ -568,6 +571,53 @@ const backNoDetail = url.pathname + (url.search ? url.search.replace(/[?&]detail
   )}
 
   <script>
+    (function () {
+      const form = document.querySelector('[data-autosave-form]') as HTMLFormElement | null;
+      if (!form) return;
+      const url = (form as HTMLElement).dataset.autosaveUrl!;
+      const id = (form as HTMLElement).dataset.autosaveId!;
+      const statusEl = document.getElementById('field-autosave-status');
+      let resetTimer: ReturnType<typeof setTimeout>;
+
+      function setStatus(text: string, cls: string) {
+        if (!statusEl) return;
+        statusEl.textContent = text;
+        statusEl.className = `text-xs h-4 text-right tabular-nums transition-colors ${cls}`;
+        clearTimeout(resetTimer);
+        if (text) resetTimer = setTimeout(() => { statusEl.textContent = ''; }, 2000);
+      }
+
+      async function doSave(field: string, value: unknown) {
+        setStatus('Saving…', 'text-stone-400');
+        try {
+          const res = await fetch(url, {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ id, [field]: value }),
+          });
+          if (!res.ok) throw new Error();
+          setStatus('Saved', 'text-emerald-600');
+        } catch {
+          setStatus('Error saving', 'text-rose-600');
+        }
+      }
+
+      form.querySelectorAll<HTMLElement>('[data-autosave]').forEach(el => {
+        const field = el.dataset.autosave!;
+        if (el instanceof HTMLSelectElement) {
+          el.addEventListener('change', () => doSave(field, el.value));
+        } else if (el instanceof HTMLInputElement) {
+          if (el.type === 'checkbox') {
+            el.addEventListener('change', () => doSave(field, el.checked));
+          } else if (el.type === 'date') {
+            el.addEventListener('change', () => doSave(field, el.value || null));
+          } else {
+            el.addEventListener('blur', () => doSave(field, el.value));
+          }
+        }
+      });
+    })();
+
     document.querySelectorAll('[data-clone-open]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const kind = (btn as HTMLElement).dataset.cloneOpen;

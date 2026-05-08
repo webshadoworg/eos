@@ -111,7 +111,7 @@ export const PUT: APIRoute = async ({ request, locals }) => {
   return new Response(null, { status: 204 });
 };
 
-const ISSUE_PATCH_FIELDS = new Set(['status', 'description', 'title', 'priority', 'term_type']);
+const ISSUE_PATCH_FIELDS = new Set(['status', 'description', 'title', 'priority', 'term_type', 'team_id', 'owner_employee_id']);
 
 export const PATCH: APIRoute = async ({ request, locals }) => {
   const body = await request.json();
