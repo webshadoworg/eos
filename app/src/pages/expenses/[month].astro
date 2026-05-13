@@ -4,7 +4,7 @@ import ExpenseStatusPicker from '~/components/ExpenseStatusPicker.svelte';
 import ExpenseNotes from '~/components/ExpenseNotes.svelte';
 import VendorInfoTip from '~/components/VendorInfoTip.astro';
 import VendorEditPanel from '~/components/VendorEditPanel.svelte';
-import { Wallet, ArrowLeft, Calendar, TrendingUp, CreditCard, X, Check, CircleHelp, Circle, ArrowRightLeft, ChevronLeft, ChevronRight, Info } from 'lucide-svelte';
+import { Wallet, ArrowLeft, Calendar, TrendingUp, TrendingDown, CreditCard, X, Check, CircleHelp, Circle, ArrowRightLeft, ChevronLeft, ChevronRight, Info } from 'lucide-svelte';
 import { supabase } from '~/lib/supabase';
 import { resolveMethodFilter } from '~/lib/expense-method';
 import { canAccessExpenses, getOwnedMethods } from '~/lib/permissions';
@@ -28,6 +28,7 @@ if (!isFinance) {
   }
 }
 const statusFilter = Astro.url.searchParams.get('status') ?? 'all';
+const showReducible = Astro.url.searchParams.get('reducible') === '1';
 
 // Counts for the filter chips — unaffected by the current status filter so
 // the numbers stay stable as you click through.
@@ -46,6 +47,10 @@ const statusCounts = {
   cancelled: (countsData ?? []).filter((r: any) => r.status === 'cancelled').length,
 };
 
+let reducibleCountQuery = supabase.from('expenses').select('expense_id', { count: 'exact', head: true }).eq('month', month).eq('potentially_reducible', true);
+if (methodFilter) reducibleCountQuery = reducibleCountQuery.eq('method', methodFilter);
+const { count: reducibleCount } = await reducibleCountQuery;
+
 let expQuery = supabase
   .from('expenses')
   .select('expense_id, month, date, method, vendor, amount, status, move_to_method, potentially_reducible')
@@ -53,7 +58,11 @@ let expQuery = supabase
   .order('date', { ascending: false })
   .order('expense_id', { ascending: false });
 if (methodFilter) expQuery = expQuery.eq('method', methodFilter);
-if (statusFilter !== 'all') expQuery = expQuery.eq('status', statusFilter);
+if (showReducible) {
+  expQuery = expQuery.eq('potentially_reducible', true);
+} else if (statusFilter !== 'all') {
+  expQuery = expQuery.eq('status', statusFilter);
+}
 
 const [{ data: expenses }, { data: vendors }, { data: methods }] = await Promise.all([
   expQuery,
@@ -320,9 +329,9 @@ const fmtMonthLabel = (m: string) => {
     </div>
   )}
 
-  {/* Status filter chips */}
+  {/* Filter chips */}
   <div class="mb-6 flex flex-wrap items-center gap-2 text-xs">
-    {([
+    {!showReducible && ([
       { key: 'all',       label: 'All',        color: 'bg-stone-100 text-stone-700 border-stone-300',         activeColor: 'bg-stone-800 text-white border-stone-800',         Icon: null },
       { key: 'none',      label: 'Unreviewed', color: 'bg-white text-stone-600 border-stone-300',             activeColor: 'bg-stone-600 text-white border-stone-600',         Icon: Circle },
       { key: 'good',      label: 'Good',       color: 'bg-emerald-50 text-emerald-700 border-emerald-300',    activeColor: 'bg-emerald-500 text-white border-emerald-500',     Icon: Check },
@@ -346,6 +355,14 @@ const fmtMonthLabel = (m: string) => {
         </a>
       );
     })}
+    <a
+      href={showReducible ? `/expenses/${month}` : `/expenses/${month}?reducible=1`}
+      class={`inline-flex items-center gap-1.5 border rounded-full px-3 py-1.5 font-medium transition ${showReducible ? 'bg-violet-500 text-white border-violet-500' : 'bg-violet-50 text-violet-700 border-violet-300 hover:border-violet-400'}`}
+    >
+      <TrendingDown size={12} />
+      Reducible
+      <span class={`tabular-nums ${showReducible ? 'opacity-80' : 'opacity-60'}`}>· {reducibleCount ?? 0}</span>
+    </a>
   </div>
 
   {unmatchedSet.size > 0 && (
