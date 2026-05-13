@@ -40,7 +40,7 @@ const statusCounts = {
 
 let expQuery = supabase
   .from('expenses')
-  .select('expense_id, month, date, method, vendor, amount, status, move_to_method')
+  .select('expense_id, month, date, method, vendor, amount, status, move_to_method, potentially_reducible')
   .in('status', statusList as unknown as string[])
   .order('date', { ascending: false })
   .order('expense_id', { ascending: false });
@@ -63,6 +63,7 @@ type Expense = {
   amount: string | number;
   status: 'none' | 'good' | 'to_review' | 'cancelled' | 'to_move';
   move_to_method: string | null;
+  potentially_reducible: boolean;
 };
 
 // Vendor match (case-insensitive) — same logic as the month page.
@@ -291,6 +292,7 @@ function chipHref(next: string) {
                           client:load
                           id={c.expense_id}
                           initial={c.status}
+                          initialReducible={c.potentially_reducible}
                           currentMethod={c.method}
                           moveTargetInitial={c.move_to_method}
                           methods={methodsForPicker}

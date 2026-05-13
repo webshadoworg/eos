@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Check, CircleHelp, X, Circle, ArrowRightLeft } from 'lucide-svelte';
+  import { Check, CircleHelp, X, Circle, ArrowRightLeft, TrendingDown } from 'lucide-svelte';
 
   type MethodOption = { name: string; label: string | null; ownerName: string | null };
 
@@ -9,6 +9,7 @@
     id,
     ids,
     initial = 'none',
+    initialReducible = false,
     currentMethod,
     moveTargetInitial,
     methods = [],
@@ -17,6 +18,7 @@
     id?: number;
     ids?: number[];
     initial?: string;
+    initialReducible?: boolean;
     currentMethod?: string;
     moveTargetInitial?: string | null;
     methods?: MethodOption[];
@@ -24,8 +26,10 @@
   }>();
 
   let status = $state<string>(initial);
+  let reducible = $state<boolean>(initialReducible);
   let moveTarget = $state<string | null>(moveTargetInitial ?? null);
   let pending = $state(false);
+  let pendingReducible = $state(false);
   let picking = $state(false); // true when choosing the target card
 
   const options = [
@@ -99,6 +103,16 @@
     picking = false;
   }
 
+  async function toggleReducible() {
+    if (pendingReducible) return;
+    pendingReducible = true;
+    const next = !reducible;
+    reducible = next;
+    const ok = await patch(buildBody({ potentially_reducible: next }));
+    if (!ok) reducible = !next;
+    pendingReducible = false;
+  }
+
   const targetLabel = $derived.by(() => {
     if (!moveTarget) return '';
     const m = methods.find((x) => x.name === moveTarget);
@@ -165,6 +179,22 @@
     {#if status === 'to_move' && targetLabel}
       <span class="ml-1 text-[10px] font-medium text-sky-700 bg-sky-50 border border-sky-200 rounded-full px-1.5 py-0.5 whitespace-nowrap">
         → {targetLabel}
+      </span>
+    {/if}
+    <button
+      type="button"
+      onclick={toggleReducible}
+      disabled={pendingReducible}
+      title="Potentially reducible"
+      aria-label="Potentially reducible"
+      aria-pressed={reducible}
+      class="{btnSize} rounded-full grid place-items-center border transition disabled:opacity-60 {reducible ? 'bg-violet-500 text-white border-violet-500' : 'border-transparent text-stone-300 hover:text-violet-500'}"
+    >
+      <TrendingDown size={iconSize} strokeWidth={reducible ? 3 : 2.5} />
+    </button>
+    {#if reducible}
+      <span class="ml-0.5 text-[10px] font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-1.5 py-0.5 whitespace-nowrap">
+        Reducible
       </span>
     {/if}
   </div>

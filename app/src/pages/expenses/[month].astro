@@ -48,7 +48,7 @@ const statusCounts = {
 
 let expQuery = supabase
   .from('expenses')
-  .select('expense_id, month, date, method, vendor, amount, status, move_to_method')
+  .select('expense_id, month, date, method, vendor, amount, status, move_to_method, potentially_reducible')
   .eq('month', month)
   .order('date', { ascending: false })
   .order('expense_id', { ascending: false });
@@ -117,6 +117,7 @@ type Expense = {
   amount: string | number;
   status: 'none' | 'good' | 'to_review' | 'cancelled' | 'to_move';
   move_to_method: string | null;
+  potentially_reducible: boolean;
 };
 type Vendor = {
   vendor_id: number;
@@ -576,6 +577,7 @@ const fmtMonthLabel = (m: string) => {
                     client:load
                     id={c.expense_id}
                     initial={c.status}
+                    initialReducible={c.potentially_reducible}
                     currentMethod={c.method}
                     moveTargetInitial={c.move_to_method}
                     methods={methodsForPicker}
