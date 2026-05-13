@@ -203,6 +203,7 @@ type VendorRollup = {
   total: number;
   ids: number[];
   statuses: Set<string>;
+  anyReducible: boolean;
 };
 const byVendor = new Map<string, VendorRollup>();
 for (const e of enriched) {
@@ -215,12 +216,14 @@ for (const e of enriched) {
       total: 0,
       ids: [],
       statuses: new Set(),
+      anyReducible: false,
     });
   }
   const r = byVendor.get(key)!;
   r.count += 1;
   r.total += Number(e.amount) || 0;
   r.ids.push(e.expense_id);
+  if (e.potentially_reducible) r.anyReducible = true;
   r.statuses.add(e.status ?? 'none');
 }
 const vendorRollup = Array.from(byVendor.values()).sort((a, b) => b.total - a.total);
@@ -466,6 +469,7 @@ const fmtMonthLabel = (m: string) => {
                     client:load
                     ids={v.ids}
                     initial={rollupStatus(v)}
+                    initialReducible={v.anyReducible}
                     methods={methodsForPicker}
                     size="sm"
                   />
