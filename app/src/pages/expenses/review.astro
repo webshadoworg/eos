@@ -4,7 +4,7 @@ import ExpenseStatusPicker from '~/components/ExpenseStatusPicker.svelte';
 import ExpenseNotes from '~/components/ExpenseNotes.svelte';
 import VendorInfoTip from '~/components/VendorInfoTip.astro';
 import VendorEditPanel from '~/components/VendorEditPanel.svelte';
-import { Wallet, ArrowLeft, Calendar, AlertCircle, Circle, CircleHelp, ArrowRightLeft, CreditCard, X } from 'lucide-svelte';
+import { Wallet, ArrowLeft, Calendar, AlertCircle, Circle, CircleHelp, ArrowRightLeft, CreditCard, X, TrendingDown } from 'lucide-svelte';
 import { supabase } from '~/lib/supabase';
 import { resolveMethodFilter } from '~/lib/expense-method';
 import { canAccessExpenses, getOwnedMethods } from '~/lib/permissions';
@@ -24,6 +24,7 @@ if (!isFinance) {
 
 // Filter: 'all' (none+to_review+to_move), 'none', 'to_review', 'to_move'
 const filter = Astro.url.searchParams.get('status') ?? 'all';
+const showReducible = Astro.url.searchParams.get('reducible') === '1';
 const PENDING = ['none', 'to_review', 'to_move'] as const;
 const statusList = filter === 'all' ? PENDING : [filter];
 
@@ -38,12 +39,21 @@ const statusCounts = {
   to_move:   (countsData ?? []).filter((r: any) => r.status === 'to_move').length,
 };
 
+// Count for the reducible chip — independent of status filter.
+let reducibleCountQuery = supabase.from('expenses').select('expense_id', { count: 'exact', head: true }).eq('potentially_reducible', true);
+if (methodFilter) reducibleCountQuery = reducibleCountQuery.eq('method', methodFilter);
+const { count: reducibleCount } = await reducibleCountQuery;
+
 let expQuery = supabase
   .from('expenses')
   .select('expense_id, month, date, method, vendor, amount, status, move_to_method, potentially_reducible')
-  .in('status', statusList as unknown as string[])
   .order('date', { ascending: false })
   .order('expense_id', { ascending: false });
+if (showReducible) {
+  expQuery = expQuery.eq('potentially_reducible', true);
+} else {
+  expQuery = expQuery.in('status', statusList as unknown as string[]);
+}
 if (methodFilter) expQuery = expQuery.eq('method', methodFilter);
 
 const [{ data: expenses }, { data: vendors }, { data: methods }] = await Promise.all([
@@ -144,6 +154,12 @@ function chipHref(next: string) {
   const s = p.toString();
   return `/expenses/review${s ? '?' + s : ''}`;
 }
+function reducibleHref() {
+  const p = new URLSearchParams();
+  if (methodFilter) p.set('method', methodFilter);
+  p.set('reducible', '1');
+  return `/expenses/review?${p.toString()}`;
+}
 ---
 <AppLayout title="Review charges · GYE EOS">
   <a href={isFinance ? '/expenses' : '/'} class="inline-flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-900 mb-6">
@@ -184,9 +200,9 @@ function chipHref(next: string) {
     </div>
   )}
 
-  {/* Status filter chips */}
+  {/* Filter chips */}
   <div class="mb-6 flex flex-wrap items-center gap-2 text-xs">
-    {([
+    {!showReducible && ([
       { key: 'all',       label: 'All pending', color: 'bg-stone-100 text-stone-700 border-stone-300',      active: 'bg-stone-800 text-white border-stone-800',         Icon: null as any },
       { key: 'none',      label: 'New',         color: 'bg-white text-stone-600 border-stone-300',          active: 'bg-stone-600 text-white border-stone-600',         Icon: Circle },
       { key: 'to_review', label: 'Flagged',     color: 'bg-amber-50 text-amber-700 border-amber-300',       active: 'bg-amber-500 text-white border-amber-500',         Icon: CircleHelp },
@@ -202,6 +218,14 @@ function chipHref(next: string) {
         </a>
       );
     })}
+    <a
+      href={showReducible ? chipHref('all') : reducibleHref()}
+      class={`inline-flex items-center gap-1.5 border rounded-full px-3 py-1.5 font-medium transition ${showReducible ? 'bg-violet-500 text-white border-violet-500' : 'bg-violet-50 text-violet-700 border-violet-300 hover:border-violet-400'}`}
+    >
+      <TrendingDown size={12} />
+      Reducible
+      <span class={`tabular-nums ${showReducible ? 'opacity-80' : 'opacity-60'}`}>· {reducibleCount ?? 0}</span>
+    </a>
   </div>
 
   {monthGroups.length === 0 ? (
