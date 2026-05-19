@@ -86,6 +86,14 @@ const { data: values } = ids.length
       .lte(dateCol, ymd(newest))
   : { data: [] };
 
+// Fetch all values for average calculation (not limited to visible window)
+const { data: allValues } = ids.length
+  ? await supabase
+      .from(valuesTable)
+      .select(`measurable_id, value`)
+      .in('measurable_id', ids)
+  : { data: [] };
+
 // index: measurable_id → ymd → { value, note }
 type Cell = { value: number | null; note: string | null };
 const cellMap = new Map<string, Map<string, Cell>>();
@@ -97,6 +105,18 @@ for (const v of values ?? []) {
     note: row.note ?? null,
   });
   cellMap.set(row.measurable_id, m);
+}
+
+// index: measurable_id → all numeric values (for accurate average)
+const allValuesMap = new Map<string, number[]>();
+for (const v of allValues ?? []) {
+  const row = v as any;
+  if (row.value == null) continue;
+  const num = Number(row.value);
+  if (Number.isNaN(num)) continue;
+  const arr = allValuesMap.get(row.measurable_id) ?? [];
+  arr.push(num);
+  allValuesMap.set(row.measurable_id, arr);
 }
 
 // employees for owner picker (only when the panel is open)
@@ -141,12 +161,8 @@ function fmtValue(v: number | null | undefined, vt: string) {
   return Math.round(v * 100) / 100 + '';
 }
 function average(measurableId: string) {
-  const m = cellMap.get(measurableId);
-  if (!m) return null;
-  const nums = Array.from(m.values())
-    .map((c) => c.value)
-    .filter((v): v is number => typeof v === 'number' && !Number.isNaN(v));
-  if (!nums.length) return null;
+  const nums = allValuesMap.get(measurableId);
+  if (!nums?.length) return null;
   return nums.reduce((a, b) => a + b, 0) / nums.length;
 }
 function initials(name: string) {
