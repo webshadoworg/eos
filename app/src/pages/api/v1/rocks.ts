@@ -12,6 +12,7 @@ export const GET: APIRoute = async ({ request, url }) => {
     .from('rocks')
     .select(`
       id, title, description, status, due_date, priority_order, is_archived, created_at,
+      quarter:quarters(id, label, description, start_date, end_date),
       owner:employees!rocks_owner_employee_id_fkey(id, full_name, email),
       milestones(
         id, title, description, status, due_date, priority_order, is_archived, team_id, rock_id,
@@ -34,6 +35,15 @@ export const GET: APIRoute = async ({ request, url }) => {
     priority_order: r.priority_order,
     is_archived: r.is_archived,
     created_at: r.created_at,
+    quarter: r.quarter
+      ? {
+          id: r.quarter.id,
+          label: r.quarter.label,
+          description: r.quarter.description,
+          start_date: r.quarter.start_date,
+          end_date: r.quarter.end_date,
+        }
+      : null,
     owner: r.owner ? { id: r.owner.id, name: r.owner.full_name, email: r.owner.email } : null,
     milestones: (r.milestones ?? [])
       .sort((a: any, b: any) => (a.due_date ?? '').localeCompare(b.due_date ?? ''))

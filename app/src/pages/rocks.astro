@@ -2,7 +2,7 @@
 import AppLayout from '~/layouts/AppLayout.astro';
 import StatusCheckbox from '~/components/StatusCheckbox.svelte';
 import RichTextEditor from '~/components/RichTextEditor.svelte';
-import { Mountain, Flag, Plus, X, Trash2, Calendar, User } from 'lucide-svelte';
+import { Mountain, Flag, Plus, X, Trash2, Calendar, CalendarRange, User, Archive } from 'lucide-svelte';
 import { supabase } from '~/lib/supabase';
 
 const url = Astro.url;
@@ -13,22 +13,22 @@ const addingRock = url.searchParams.get('add_rock') === '1';
 const addingMilestone = url.searchParams.get('add_milestone') === '1';
 const editRockId = url.searchParams.get('edit');
 const editMilestoneId = url.searchParams.get('milestone');
+const managingQuarters = url.searchParams.get('quarters') === '1';
 
-const sortRocks = url.searchParams.get('sort_rocks') ?? 'priority';
+const sortRocks = url.searchParams.get('sort_rocks') ?? 'due_date';
 const sortMilestones = url.searchParams.get('sort_milestones') ?? 'priority';
 
 // Rocks are org-wide.
 let rockQuery = supabase
   .from('rocks')
   .select(`
-    id, title, description, status, due_date, priority_order, is_archived, owner_employee_id,
+    id, title, description, status, due_date, priority_order, is_archived, owner_employee_id, quarter_id,
     owner:employees!rocks_owner_employee_id_fkey(id, full_name)
   `)
   .eq('is_archived', false);
 
-if (sortRocks === 'due_date') rockQuery = rockQuery.order('due_date', { ascending: true, nullsFirst: false });
-else if (sortRocks === 'status') rockQuery = rockQuery.order('status');
-else rockQuery = rockQuery.order('priority_order', { ascending: true });
+if (sortRocks === 'status') rockQuery = rockQuery.order('status');
+else rockQuery = rockQuery.order('due_date', { ascending: true, nullsFirst: false });
 
 // Milestones: only for the CURRENT TEAM (shown at the top, relevant to this user).
 let milestoneQuery = supabase
@@ -39,18 +39,45 @@ let milestoneQuery = supabase
     rock:rocks(id, title)
   `)
   .eq('is_archived', false);
-if (team) milestoneQuery = milestoneQuery.eq('team_id', team.id);
-else milestoneQuery = milestoneQuery.eq('team_id', '__none__'); // empty if no team
+// Include teamless milestones so they stay reachable after creation.
+if (team) milestoneQuery = milestoneQuery.or(`team_id.eq.${team.id},team_id.is.null`);
+else milestoneQuery = milestoneQuery.is('team_id', null);
 
 if (sortMilestones === 'due_date') milestoneQuery = milestoneQuery.order('due_date', { ascending: true, nullsFirst: false });
 else if (sortMilestones === 'status') milestoneQuery = milestoneQuery.order('status');
 else milestoneQuery = milestoneQuery.order('priority_order', { ascending: true });
 
-const [{ data: rocks }, { data: milestones }, { data: employees }] = await Promise.all([
+const [{ data: rocks }, { data: milestones }, { data: employees }, { data: quarters }] = await Promise.all([
   rockQuery,
   milestoneQuery,
   supabase.from('employees').select('id, full_name').order('full_name'),
+  supabase.from('quarters').select('id, label, description, start_date, end_date').order('start_date', { ascending: false }),
 ]);
+
+// Current quarter = the one containing today; fallback to the most recent.
+const today = new Date().toISOString().slice(0, 10);
+const currentQuarter =
+  (quarters ?? []).find((q) => q.start_date <= today && today <= q.end_date) ?? (quarters ?? [])[0] ?? null;
+
+// Group rocks by quarter: current quarter expanded on top, others collapsed.
+const rocksByQuarter = new Map<string, any[]>();
+for (const r of rocks ?? []) {
+  const key = r.quarter_id ?? '__none__';
+  if (!rocksByQuarter.has(key)) rocksByQuarter.set(key, []);
+  rocksByQuarter.get(key)!.push(r);
+}
+type RockSection = { quarter: any | null; rocks: any[]; current: boolean };
+const rockSections: RockSection[] = [];
+if (currentQuarter) {
+  rockSections.push({ quarter: currentQuarter, rocks: rocksByQuarter.get(currentQuarter.id) ?? [], current: true });
+}
+for (const q of quarters ?? []) {
+  if (q.id === currentQuarter?.id) continue;
+  const list = rocksByQuarter.get(q.id) ?? [];
+  if (list.length) rockSections.push({ quarter: q, rocks: list, current: false });
+}
+const unassignedRocks = rocksByQuarter.get('__none__') ?? [];
+if (unassignedRocks.length) rockSections.push({ quarter: null, rocks: unassignedRocks, current: false });
 
 // Resolve panel state
 const editingRock = editRockId ? (rocks ?? []).find((r) => r.id === editRockId) ?? null : null;
@@ -99,6 +126,13 @@ const back = '/rocks';
     </div>
     <div class="flex items-center gap-2">
       <a
+        href="/rocks?quarters=1"
+        class="border border-stone-300 bg-white hover:bg-stone-50 rounded-xl px-4 py-2 text-sm font-medium flex items-center gap-1.5 text-stone-700"
+      >
+        <CalendarRange size={15} />
+        Quarters
+      </a>
+      <a
         href="/rocks?add_milestone=1"
         class="border border-stone-300 bg-white hover:bg-stone-50 rounded-xl px-4 py-2 text-sm font-medium flex items-center gap-1.5 text-stone-700"
       >
@@ -126,7 +160,7 @@ const back = '/rocks';
         {team && <span class="text-sm text-stone-400 font-normal">— {team.name}</span>}
       </h2>
       <form method="GET" class="flex gap-2">
-        {sortRocks !== 'priority' && <input type="hidden" name="sort_rocks" value={sortRocks} />}
+        {sortRocks !== 'due_date' && <input type="hidden" name="sort_rocks" value={sortRocks} />}
         <select name="sort_milestones" onchange="this.form.submit()" class="bg-white border border-stone-200 rounded-lg px-3 py-1.5 text-sm">
           <option value="priority" selected={sortMilestones === 'priority'}>Priority</option>
           <option value="due_date" selected={sortMilestones === 'due_date'}>Due date</option>
@@ -146,6 +180,7 @@ const back = '/rocks';
                   {statusLabel[m.status as keyof typeof statusLabel]}
                 </span>
                 {m.rock && <span>under <span class="text-stone-700 font-medium">{m.rock.title}</span></span>}
+                {!m.team_id && <span class="px-2 py-0.5 rounded-full border border-stone-200 bg-stone-50 text-stone-500">no team</span>}
                 {m.due_date && (
                   <span class="flex items-center gap-1"><Calendar size={12} /> {fmtDate(m.due_date)}</span>
                 )}
@@ -173,42 +208,60 @@ const back = '/rocks';
       <form method="GET" class="flex gap-2">
         {sortMilestones !== 'priority' && <input type="hidden" name="sort_milestones" value={sortMilestones} />}
         <select name="sort_rocks" onchange="this.form.submit()" class="bg-white border border-stone-200 rounded-lg px-3 py-1.5 text-sm">
-          <option value="priority" selected={sortRocks === 'priority'}>Priority</option>
           <option value="due_date" selected={sortRocks === 'due_date'}>Due date</option>
           <option value="status"   selected={sortRocks === 'status'}>Status</option>
         </select>
       </form>
     </div>
-    <div class="grid gap-3">
-      {rocks && rocks.length > 0 ? (
-        rocks.map((r: any) => (
-          <a
-            href={`/rocks?edit=${r.id}`}
-            class="bg-white border border-stone-200 rounded-xl p-5 hover:border-stone-300 hover:shadow-sm transition block"
-          >
-            <div class="flex items-start justify-between gap-4">
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 mb-1">
-                  <span class={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${statusStyles[r.status as keyof typeof statusStyles]}`}>
-                    {statusLabel[r.status as keyof typeof statusLabel]}
-                  </span>
-                  {r.due_date && <span class="text-xs text-stone-400">Due {fmtDate(r.due_date)}</span>}
-                </div>
-                <h3 class="text-base font-semibold text-stone-900">{r.title}</h3>
-                {r.description && (
-                  <div class="prose prose-sm max-w-none text-stone-500 mt-1" set:html={r.description} />
-                )}
-              </div>
-              {r.owner && (
-                <div class="flex items-center gap-2 text-sm shrink-0">
-                  <div class="w-8 h-8 rounded-full bg-violet-100 text-violet-700 grid place-items-center text-xs font-semibold">
-                    {initials(r.owner.full_name)}
-                  </div>
-                  <span class="text-stone-600 hidden md:inline">{r.owner.full_name}</span>
+    <div class="space-y-4">
+      {rockSections.length > 0 ? (
+        rockSections.map((s) => (
+          <details open={s.current} class="group">
+            <summary class="cursor-pointer select-none flex items-baseline gap-2 py-1 list-none [&::-webkit-details-marker]:hidden">
+              <span class="text-stone-400 text-xs transition group-open:rotate-90">▶</span>
+              <span class="font-semibold text-stone-800">{s.quarter ? s.quarter.label : 'No quarter'}</span>
+              {s.quarter?.description && <span class="text-sm text-stone-500">— {s.quarter.description}</span>}
+              {s.current && <span class="text-[11px] font-medium px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">Current</span>}
+              <span class="text-xs text-stone-400">{s.rocks.length} rock{s.rocks.length === 1 ? '' : 's'}</span>
+            </summary>
+            <div class="grid gap-3 mt-2">
+              {s.rocks.length > 0 ? (
+                s.rocks.map((r: any) => (
+                  <a
+                    href={`/rocks?edit=${r.id}`}
+                    class="bg-white border border-stone-200 rounded-xl p-5 hover:border-stone-300 hover:shadow-sm transition block"
+                  >
+                    <div class="flex items-start justify-between gap-4">
+                      <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2 mb-1">
+                          <span class={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${statusStyles[r.status as keyof typeof statusStyles]}`}>
+                            {statusLabel[r.status as keyof typeof statusLabel]}
+                          </span>
+                          {r.due_date && <span class="text-xs text-stone-400">Due {fmtDate(r.due_date)}</span>}
+                        </div>
+                        <h3 class="text-base font-semibold text-stone-900">{r.title}</h3>
+                        {r.description && (
+                          <div class="prose prose-sm max-w-none text-stone-500 mt-1" set:html={r.description} />
+                        )}
+                      </div>
+                      {r.owner && (
+                        <div class="flex items-center gap-2 text-sm shrink-0">
+                          <div class="w-8 h-8 rounded-full bg-violet-100 text-violet-700 grid place-items-center text-xs font-semibold">
+                            {initials(r.owner.full_name)}
+                          </div>
+                          <span class="text-stone-600 hidden md:inline">{r.owner.full_name}</span>
+                        </div>
+                      )}
+                    </div>
+                  </a>
+                ))
+              ) : (
+                <div class="bg-white border border-stone-200 rounded-xl px-4 py-8 text-center text-sm text-stone-400">
+                  No rocks yet this quarter.
                 </div>
               )}
             </div>
-          </a>
+          </details>
         ))
       ) : (
         <div class="bg-white border border-stone-200 rounded-xl px-4 py-12 text-center text-sm text-stone-400">
@@ -263,6 +316,21 @@ const back = '/rocks';
               </select>
             </div>
 
+            <div>
+              <label class="text-sm font-medium text-stone-700">Quarter</label>
+              <select name="quarter_id" class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm">
+                <option value="">No quarter</option>
+                {quarters?.map((q) => (
+                  <option
+                    value={q.id}
+                    selected={editingRock ? q.id === editingRock.quarter_id : q.id === currentQuarter?.id}
+                  >
+                    {q.label}{q.description ? ` — ${q.description}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div class="grid grid-cols-2 gap-3">
               <div>
                 <label class="text-sm font-medium text-stone-700">Due date</label>
@@ -287,19 +355,32 @@ const back = '/rocks';
           </form>
 
           {editingRock && (
-            <form
-              method="POST"
-              action="/api/rocks"
-              class="pt-4 border-t border-stone-200"
-              onsubmit="return confirm('Delete this rock?');"
-            >
-              <input type="hidden" name="_action" value="delete" />
-              <input type="hidden" name="id" value={editingRock.id} />
-              <input type="hidden" name="back" value={back} />
-              <button class="w-full border border-rose-300 text-rose-700 rounded-lg py-2 text-sm font-medium flex items-center justify-center gap-2">
-                <Trash2 size={14} /> Delete rock
-              </button>
-            </form>
+            <div class="pt-4 border-t border-stone-200 space-y-2">
+              <form
+                method="POST"
+                action="/api/rocks"
+                onsubmit="return confirm('Archive this rock? It will be hidden from the list but kept in the database.');"
+              >
+                <input type="hidden" name="_action" value="archive" />
+                <input type="hidden" name="id" value={editingRock.id} />
+                <input type="hidden" name="back" value={back} />
+                <button class="w-full border border-stone-300 text-stone-600 rounded-lg py-2 text-sm font-medium flex items-center justify-center gap-2 hover:bg-stone-50">
+                  <Archive size={14} /> Archive rock
+                </button>
+              </form>
+              <form
+                method="POST"
+                action="/api/rocks"
+                onsubmit="return confirm('Delete this rock? This cannot be undone — prefer Archive to keep history.');"
+              >
+                <input type="hidden" name="_action" value="delete" />
+                <input type="hidden" name="id" value={editingRock.id} />
+                <input type="hidden" name="back" value={back} />
+                <button class="w-full border border-rose-300 text-rose-700 rounded-lg py-2 text-sm font-medium flex items-center justify-center gap-2">
+                  <Trash2 size={14} /> Delete rock
+                </button>
+              </form>
+            </div>
           )}
         </div>
       </aside>
@@ -412,6 +493,96 @@ const back = '/rocks';
               </button>
             </form>
           )}
+        </div>
+      </aside>
+    </div>
+  )}
+
+  <!-- ============================================================
+       QUARTERS manage slide-over
+       ============================================================ -->
+  {managingQuarters && (
+    <div class="fixed inset-0 z-30">
+      <a href={back} class="absolute inset-0 bg-black/20"></a>
+      <aside class="absolute right-0 top-0 bottom-0 w-full max-w-md bg-white shadow-2xl overflow-y-auto">
+        <div class="p-6 space-y-5">
+          <div class="flex items-center justify-between">
+            <h2 class="text-xl font-semibold text-stone-900">Quarters</h2>
+            <a href={back} class="p-1 text-stone-400 hover:text-stone-700"><X size={18} /></a>
+          </div>
+          <p class="text-sm text-stone-500">
+            Quarters are flexible — set the dates however the year actually runs, and adjust the end date if a quarter stretches.
+          </p>
+
+          {quarters?.map((q) => (
+            <div class={`border rounded-xl p-4 ${q.id === currentQuarter?.id ? 'border-violet-300 bg-violet-50/40' : 'border-stone-200'}`}>
+              <form method="POST" action="/api/quarters" class="space-y-3">
+                <input type="hidden" name="_action" value="update" />
+                <input type="hidden" name="id" value={q.id} />
+                <input type="hidden" name="back" value="/rocks?quarters=1" />
+                <div class="flex items-center gap-2">
+                  <input type="text" name="label" required value={q.label}
+                    class="flex-1 bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm font-medium" />
+                  {q.id === currentQuarter?.id && (
+                    <span class="text-[11px] font-medium px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 shrink-0">Current</span>
+                  )}
+                </div>
+                <input type="text" name="description" value={q.description ?? ''} placeholder="Description — e.g. Summer sprint"
+                  class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm" />
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="text-xs text-stone-500">Start</label>
+                    <input type="date" name="start_date" required value={q.start_date}
+                      class="mt-0.5 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div>
+                    <label class="text-xs text-stone-500">End</label>
+                    <input type="date" name="end_date" required value={q.end_date}
+                      class="mt-0.5 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                </div>
+                <button class="w-full border border-stone-300 text-stone-700 rounded-lg py-2 text-sm font-medium hover:bg-stone-50">
+                  Save changes
+                </button>
+              </form>
+              <form
+                method="POST"
+                action="/api/quarters"
+                class="mt-2 text-right"
+                onsubmit="return confirm('Delete this quarter? Its rocks will remain, unassigned.');"
+              >
+                <input type="hidden" name="_action" value="delete" />
+                <input type="hidden" name="id" value={q.id} />
+                <input type="hidden" name="back" value="/rocks?quarters=1" />
+                <button class="text-xs text-rose-600 hover:text-rose-700 inline-flex items-center gap-1">
+                  <Trash2 size={12} /> Delete quarter
+                </button>
+              </form>
+            </div>
+          ))}
+
+          <form method="POST" action="/api/quarters" class="border border-dashed border-stone-300 rounded-xl p-4 space-y-3">
+            <input type="hidden" name="_action" value="create" />
+            <input type="hidden" name="back" value="/rocks?quarters=1" />
+            <h3 class="text-sm font-semibold text-stone-800 flex items-center gap-1.5"><Plus size={14} /> Add quarter</h3>
+            <input type="text" name="label" required placeholder="Label — e.g. Q3 2026"
+              class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm" />
+            <input type="text" name="description" placeholder="Description — e.g. Year-end push (optional)"
+              class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm" />
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="text-xs text-stone-500">Start</label>
+                <input type="date" name="start_date" required class="mt-0.5 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label class="text-xs text-stone-500">End</label>
+                <input type="date" name="end_date" required class="mt-0.5 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+            </div>
+            <button class="w-full bg-violet-600 hover:bg-violet-700 text-white rounded-lg py-2.5 text-sm font-medium">
+              Create quarter
+            </button>
+          </form>
         </div>
       </aside>
     </div>

@@ -17,6 +17,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       description: String(form.get('description') ?? '') || null,
       owner_employee_id: String(form.get('owner_employee_id') ?? '') || null,
       due_date: String(form.get('due_date') ?? '') || null,
+      quarter_id: String(form.get('quarter_id') ?? '') || null,
       status: String(form.get('status') ?? 'on_track'),
       priority_order: Number(form.get('priority_order') ?? 0),
     });
@@ -32,8 +33,17 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       description: String(form.get('description') ?? '') || null,
       owner_employee_id: String(form.get('owner_employee_id') ?? '') || null,
       due_date: String(form.get('due_date') ?? '') || null,
+      quarter_id: String(form.get('quarter_id') ?? '') || null,
       status: String(form.get('status') ?? 'on_track'),
     }).eq('id', id);
+    if (error) return new Response(`Error: ${error.message}`, { status: 500 });
+    return redirect(back);
+  }
+
+  if (action === 'archive') {
+    const id = String(form.get('id') ?? '');
+    if (!id) return new Response('id required', { status: 400 });
+    const { error } = await supabase.from('rocks').update({ is_archived: true }).eq('id', id);
     if (error) return new Response(`Error: ${error.message}`, { status: 500 });
     return redirect(back);
   }
@@ -48,7 +58,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   return new Response('unknown action', { status: 400 });
 };
 
-const ROCK_PATCH_FIELDS = new Set(['status', 'description', 'title', 'due_date', 'owner_employee_id']);
+const ROCK_PATCH_FIELDS = new Set(['status', 'description', 'title', 'due_date', 'owner_employee_id', 'quarter_id', 'is_archived']);
 
 export const PATCH: APIRoute = async ({ request }) => {
   const body = await request.json();
