@@ -1,11 +1,27 @@
 import { defineMiddleware } from 'astro:middleware';
-import { readSession } from '~/lib/session';
+import { readSession, type SessionPayload } from '~/lib/session';
 import { fetchAllowedTeams, resolveCurrentTeam } from '~/lib/team';
+import { supabase } from '~/lib/supabase';
 
 const PUBLIC_PATHS = new Set<string>(['/login', '/auth/google', '/auth/callback']);
 
+// In local dev, skip Google login and act as this user.
+const DEV_USER_EMAIL = 'mendy@guardyoureyes.org';
+let devSession: SessionPayload | null = null;
+async function getDevSession(): Promise<SessionPayload | null> {
+  if (devSession) return devSession;
+  const { data } = await supabase
+    .from('employees')
+    .select('id, full_name, email')
+    .eq('email', DEV_USER_EMAIL)
+    .maybeSingle();
+  if (data) devSession = { email: data.email, employeeId: data.id, fullName: data.full_name };
+  return devSession;
+}
+
 export const onRequest = defineMiddleware(async (context, next) => {
-  const session = await readSession(context.cookies);
+  let session = await readSession(context.cookies);
+  if (!session && import.meta.env.DEV) session = await getDevSession();
   context.locals.user = session;
   context.locals.allowedTeams = [];
   context.locals.currentTeam = null;
