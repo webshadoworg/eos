@@ -13,8 +13,13 @@ interface Seat {
 
 interface Props {
   seat: Seat;
+  /** 0 = root. Seats at depth < DEFAULT_OPEN_DEPTH start expanded, so the
+   *  chart shows three levels (root, children, grandchildren) by default. */
+  depth?: number;
 }
-const { seat } = Astro.props;
+const DEFAULT_OPEN_DEPTH = 2;
+const { seat, depth = 0 } = Astro.props;
+const openByDefault = depth < DEFAULT_OPEN_DEPTH;
 
 const displayPerson = seat.employee?.full_name || seat.person_name || '';
 const initials = displayPerson
@@ -26,7 +31,7 @@ const toggleId = `exp-${seat.id}`;
 ---
 <div class:list={['seat-wrapper', !hasChildren && 'leaf']}>
   {hasChildren && (
-    <input type="checkbox" id={toggleId} class="expand-toggle" aria-label={`Expand ${seat.title}`} />
+    <input type="checkbox" id={toggleId} class="expand-toggle" checked={openByDefault} aria-label={`Expand ${seat.title}`} />
   )}
   <div class="seat-card">
     <div class="seat-actions">
@@ -63,7 +68,7 @@ const toggleId = `exp-${seat.id}`;
     <ul>
       {seat.children.map((c) => (
         <li>
-          <Astro.self seat={c} />
+          <Astro.self seat={c} depth={depth + 1} />
         </li>
       ))}
     </ul>
