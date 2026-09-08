@@ -1,6 +1,11 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '~/lib/supabase';
 
+function parseOrder(raw: FormDataEntryValue | null): number {
+  const n = parseInt(String(raw ?? ''), 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function parseResponsibilities(raw: string | null): string[] {
   if (!raw) return [];
   return raw.split('\n').map((s) => s.trim()).filter(Boolean);
@@ -18,6 +23,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const { error } = await supabase.from('org_seats').insert({
       title,
       parent_id,
+      display_order: parseOrder(form.get('display_order')),
       employee_id: String(form.get('employee_id') ?? '') || null,
       person_name: String(form.get('person_name') ?? '') || null,
       responsibilities: parseResponsibilities(String(form.get('responsibilities') ?? '')),
@@ -32,6 +38,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
     const patch: Record<string, unknown> = {
       title: String(form.get('title') ?? '').trim(),
+      display_order: parseOrder(form.get('display_order')),
       employee_id: String(form.get('employee_id') ?? '') || null,
       person_name: String(form.get('person_name') ?? '') || null,
       responsibilities: parseResponsibilities(String(form.get('responsibilities') ?? '')),
