@@ -80,6 +80,21 @@ const exportTree: SeatExport | null = root ? toExport(root) : null;
 const editing = editId ? seatById.get(editId) ?? null : null;
 const addingUnder = addUnderId ? seatById.get(addUnderId) ?? null : null;
 
+// Flattened tree (depth-first) for the "Reports to" selector, excluding the
+// seat being edited and all of its descendants (would create a cycle).
+type ParentOption = { id: string; label: string; depth: number };
+const parentOptions: ParentOption[] = [];
+if (editing && root) {
+  const excluded = new Set<string>();
+  const collect = (s: Seat) => { excluded.add(s.id); s.children.forEach(collect); };
+  collect(editing);
+  const walk = (s: Seat, depth: number) => {
+    if (!excluded.has(s.id)) parentOptions.push({ id: s.id, label: s.title, depth });
+    s.children.forEach((c) => walk(c, depth + 1));
+  };
+  walk(root, 0);
+}
+
 const back = '/chart';
 ---
 <AppLayout title="Org Chart · GYE EOS" fullWidth={true}>
@@ -144,6 +159,19 @@ const back = '/chart';
               <input type="text" name="title" required value={editing?.title ?? ''}
                 class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-400" />
             </div>
+
+            {editing && editing.parent_id && (
+              <div>
+                <label class="text-sm font-medium text-stone-700">Reports to</label>
+                <select name="parent_id" required class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm">
+                  {parentOptions.map((o) => (
+                    <option value={o.id} selected={o.id === editing.parent_id}>
+                      {'\u00a0\u00a0'.repeat(o.depth) + o.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div>
               <label class="text-sm font-medium text-stone-700">Employee</label>
