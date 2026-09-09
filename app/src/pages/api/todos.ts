@@ -2,6 +2,8 @@ import type { APIRoute } from 'astro';
 import { supabase } from '~/lib/supabase';
 import { canAccessTeam } from '~/lib/team';
 
+const TODO_STATUSES = new Set(['open', 'in_progress', 'done', 'archived']);
+
 async function assertTodoTeamAccess(id: string, locals: App.Locals) {
   const { data } = await supabase.from('todos').select('team_id').eq('id', id).maybeSingle();
   return canAccessTeam(locals, data?.team_id);
@@ -58,7 +60,10 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
       patch.is_urgent = form.get('is_urgent') === 'on';
     }
     const status = form.get('status');
-    if (status) patch.status = String(status);
+    if (status) {
+      if (!TODO_STATUSES.has(String(status))) return new Response('invalid status', { status: 400 });
+      patch.status = String(status);
+    }
     if (Object.keys(patch).length === 0) return redirect(back);
     const { error } = await supabase.from('todos').update(patch).eq('id', id);
     if (error) return new Response(`Error: ${error.message}`, { status: 500 });
@@ -96,7 +101,9 @@ export const PATCH: APIRoute = async ({ request, locals }) => {
   if (!(await assertTodoTeamAccess(id, locals))) return new Response('Forbidden', { status: 403 });
   const patch: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(rest)) {
-    if (TODO_PATCH_FIELDS.has(k)) patch[k] = v;
+    if (!TODO_PATCH_FIELDS.has(k)) continue;
+    if (k === 'status' && !TODO_STATUSES.has(String(v))) return new Response('invalid status', { status: 400 });
+    patch[k] = v;
   }
   if (Object.keys(patch).length === 0) return new Response('no valid fields', { status: 400 });
   const { error } = await supabase.from('todos').update(patch).eq('id', id);

@@ -2,6 +2,8 @@ import type { APIRoute } from 'astro';
 import { supabase } from '~/lib/supabase';
 import { requireApiKey, json } from '~/lib/api-auth';
 
+const TODO_STATUSES = new Set(['open', 'in_progress', 'done', 'archived']);
+
 // ---------- helpers ----------
 async function resolveEmployeeByEmail(email: string): Promise<string | null> {
   const { data } = await supabase.from('employees').select('id').ilike('email', email).maybeSingle();
@@ -48,7 +50,8 @@ export const GET: APIRoute = async ({ request, url }) => {
   if (assigneeId) q = q.eq('assignee_employee_id', assigneeId);
   if (resolvedTeamId) q = q.eq('team_id', resolvedTeamId);
   if (milestoneId) q = q.eq('milestone_id', milestoneId);
-  if (status !== 'all') q = q.eq('status', status);
+  if (status === 'active') q = q.in('status', ['open', 'in_progress']);
+  else if (status !== 'all') q = q.eq('status', status);
 
   const { data, error } = await q;
   if (error) return json({ error: error.message }, 500);
@@ -125,8 +128,9 @@ export const POST: APIRoute = async ({ request }) => {
 
 // ============================================================
 // PATCH /api/v1/todos — update a todo
-// body: { id (required), done?, is_urgent?, due_date?, assignee_email?, milestone_id?, title?, description? }
-//   - done: toggles status between 'open' and 'done'
+// body: { id (required), status?, done?, is_urgent?, due_date?, assignee_email?, milestone_id?, title?, description? }
+//   - status: open | in_progress | done | archived
+//   - done: toggles status between 'open' and 'done' (status wins if both given)
 //   - assignee_email: pass null/empty string to unassign
 //   - due_date: YYYY-MM-DD, or null/empty string to clear
 // ============================================================
@@ -144,6 +148,10 @@ export const PATCH: APIRoute = async ({ request }) => {
 
   if (body.done !== undefined) {
     patch.status = Boolean(body.done) ? 'done' : 'open';
+  }
+  if (body.status !== undefined) {
+    if (!TODO_STATUSES.has(String(body.status))) return json({ error: 'status must be open | in_progress | done | archived' }, 400);
+    patch.status = String(body.status);
   }
   if (body.is_urgent !== undefined) {
     patch.is_urgent = Boolean(body.is_urgent);

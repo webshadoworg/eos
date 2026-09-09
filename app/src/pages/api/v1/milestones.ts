@@ -66,7 +66,7 @@ export const GET: APIRoute = async ({ request, url }) => {
     for (const t of todos ?? []) {
       const c = counts.get(t.milestone_id) ?? { open: 0, total: 0 };
       c.total += 1;
-      if (t.status === 'open') c.open += 1;
+      if (t.status === 'open' || t.status === 'in_progress') c.open += 1;
       counts.set(t.milestone_id, c);
     }
   }

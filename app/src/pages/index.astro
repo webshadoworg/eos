@@ -21,7 +21,7 @@ const [
   { data: ownedMethods },
 ] = await Promise.all([
   supabase.from('rocks').select('*', { count: 'exact', head: true }).eq('is_archived', false),
-  teamFilter(supabase.from('todos').select('*', { count: 'exact', head: true }).eq('status', 'open')),
+  teamFilter(supabase.from('todos').select('*', { count: 'exact', head: true }).in('status', ['open', 'in_progress'])),
   teamFilter(supabase.from('issues').select('*', { count: 'exact', head: true }).eq('status', 'open')),
   supabase.from('employees').select('*', { count: 'exact', head: true }),
   supabase

@@ -232,7 +232,7 @@ curl -s -X PATCH "$EOS_API_URL/todos" \
   -d '{"id":"<todo-id>","due_date":null}'
 ```
 
-Updatable fields on `PATCH /api/v1/todos`: `done` (toggles status `open` ↔ `done`), `is_urgent`, `due_date`, `assignee_email`. At least one must be provided.
+Updatable fields on `PATCH /api/v1/todos`: `status` (`open` | `in_progress` | `done` | `archived`), `done` (toggles status `open` ↔ `done`), `is_urgent`, `due_date`, `assignee_email`. At least one must be provided.
 
 ## 5. Error responses
 
