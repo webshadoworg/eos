@@ -5,6 +5,9 @@ import { supabase } from '~/lib/supabase';
 const team = Astro.locals.currentTeam;
 const teamFilter = (q: any) => (team ? q.eq('team_id', team.id) : q);
 
+// Temporarily hidden — flip to true to bring back the Recent Activity section.
+const showRecentActivity = false;
+
 const today = new Date().toISOString().slice(0, 10);
 const currentEmployeeId = Astro.locals.user?.employeeId ?? '';
 
@@ -271,6 +274,7 @@ const firstName = user.fullName?.split(' ')[0] || 'there';
     </section>
   )}
 
+  {showRecentActivity && (
   <section>
     <div class="flex items-center justify-between mb-4">
       <div class="flex items-center gap-2">
@@ -337,4 +341,5 @@ const firstName = user.fullName?.split(' ')[0] || 'there';
       </div>
     )}
   </section>
+  )}
 </AppLayout>
