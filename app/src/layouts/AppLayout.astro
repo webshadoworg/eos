@@ -1,6 +1,6 @@
 ---
 import '~/styles/global.css';
-import { Mountain, Target, AlertCircle, ListTodo, ChartBar, Focus, Eye, LogOut } from 'lucide-svelte';
+import { Mountain, Target, AlertCircle, ListTodo, ChartBar, Focus, Eye, LogOut, Link2 } from 'lucide-svelte';
 import MoreMenu from '~/components/MoreMenu.svelte';
 import MobileMenu from '~/components/MobileMenu.svelte';
 import { canAccessExpenses } from '~/lib/permissions';
@@ -25,6 +25,7 @@ const nav = [
   { href: '/todos',     label: 'To-Dos',        icon: ListTodo },
   { href: '/scorecard', label: 'Scorecard',     icon: ChartBar },
   { href: '/focus',     label: 'Current Focus', icon: Focus },
+  { href: '/links',     label: 'Links',         icon: Link2 },
 ];
 
 const initials = (n: string) =>

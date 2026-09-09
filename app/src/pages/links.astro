@@ -10,10 +10,16 @@ const adding = url.searchParams.get('add') === '1';
 const team = Astro.locals.currentTeam;
 const allowedTeams = Astro.locals.allowedTeams;
 
-// Org-wide links (team_id null) plus the current team's own links.
+// Default: only the current team's links. ?scope=all: every team you belong
+// to plus org-wide.
+const scope = url.searchParams.get('scope') === 'all' || !team ? 'all' : 'team';
+const allowedIds = allowedTeams.map((t) => t.id);
 let q = supabase.from('links').select('*').order('title');
-q = team ? q.or(`team_id.is.null,team_id.eq.${team.id}`) : q.is('team_id', null);
+if (scope === 'team' && team) q = q.eq('team_id', team.id);
+else if (allowedIds.length) q = q.or(`team_id.is.null,team_id.in.(${allowedIds.join(',')})`);
+else q = q.is('team_id', null);
 const { data: links } = await q;
+const teamName = new Map(allowedTeams.map((t) => [t.id, t.name]));
 
 const groupByCategory = (rows: any[]) => {
   const grouped = new Map<string, any[]>();
@@ -24,13 +30,24 @@ const groupByCategory = (rows: any[]) => {
   }
   return new Map([...grouped.entries()].sort(([a], [b]) => a.localeCompare(b)));
 };
-const teamLinks = (links ?? []).filter((l: any) => l.team_id);
-const orgLinks = (links ?? []).filter((l: any) => !l.team_id);
-const teamGrouped = groupByCategory(teamLinks);
-const orgGrouped = groupByCategory(orgLinks);
+// Sections: current team first, then other teams alphabetically, then org-wide.
+type Section = { key: string; label: string; icon: any; grouped: Map<string, any[]> };
+const byTeam = new Map<string, any[]>();
+for (const l of links ?? []) {
+  const k = l.team_id ?? '';
+  if (!byTeam.has(k)) byTeam.set(k, []);
+  byTeam.get(k)!.push(l);
+}
+const sections: Section[] = [];
+if (team && byTeam.has(team.id)) sections.push({ key: team.id, label: team.name, icon: Users, grouped: groupByCategory(byTeam.get(team.id)!) });
+for (const [k, rows] of [...byTeam.entries()].filter(([k]) => k && k !== team?.id).sort(([a], [b]) => (teamName.get(a) ?? '').localeCompare(teamName.get(b) ?? ''))) {
+  sections.push({ key: k, label: teamName.get(k) ?? 'Other team', icon: Users, grouped: groupByCategory(rows) });
+}
+if (byTeam.has('')) sections.push({ key: 'org', label: 'Org-wide', icon: Globe, grouped: groupByCategory(byTeam.get('')!) });
+const showSectionHeaders = scope === 'all';
 const categories = [...new Set((links ?? []).map((l: any) => l.category).filter(Boolean))].sort() as string[];
-// New links default to the current team when it is a project; otherwise org-wide.
-const defaultTeamId = team && isProjectTeam(team) ? team.id : '';
+// New links default to the current team in team view; in the all-links view, to the team if it is a project, else org-wide.
+const defaultTeamId = team && (scope === 'team' || isProjectTeam(team)) ? team.id : '';
 
 let editing: any = null;
 if (editId) editing = (links ?? []).find((l) => l.id === editId) ?? null;
@@ -44,8 +61,8 @@ function faviconFor(linkUrl: string) {
   }
 }
 
-const back = Astro.url.pathname;
-const backWithEdit = (id: string) => `${Astro.url.pathname}?edit=${id}`;
+const back = scope === 'all' ? '/links?scope=all' : '/links';
+const backWithEdit = (id: string) => scope === 'all' ? `/links?scope=all&edit=${id}` : `/links?edit=${id}`;
 ---
 <AppLayout title="Links · GYE EOS">
   <header class="flex items-start justify-between mb-8">
@@ -55,31 +72,40 @@ const backWithEdit = (id: string) => `${Astro.url.pathname}?edit=${id}`;
       </div>
       <div>
         <h1 class="text-2xl font-semibold text-stone-900">Links</h1>
-        <p class="text-stone-500 text-sm">Shared tools, docs, and shortcuts{team && <> — org-wide and for <span class="text-stone-700 font-medium">{team.name}</span></>}</p>
+        <p class="text-stone-500 text-sm">
+          {scope === 'team' && team
+            ? <>Links for <span class="text-stone-700 font-medium">{team.name}</span></>
+            : <>All links — every team you're on, plus org-wide</>}
+        </p>
       </div>
     </div>
+    <div class="flex items-center gap-2">
+      {team && (
+        <div class="flex rounded-xl border border-stone-300 bg-white overflow-hidden text-sm font-medium">
+          <a href="/links" class={`px-3 py-2 ${scope === 'team' ? 'bg-stone-800 text-white' : 'text-stone-600 hover:bg-stone-50'}`}>{team.name}</a>
+          <a href="/links?scope=all" class={`px-3 py-2 ${scope === 'all' ? 'bg-stone-800 text-white' : 'text-stone-600 hover:bg-stone-50'}`}>All links</a>
+        </div>
+      )}
     <a
-      href="/links?add=1"
+      href={scope === 'all' ? '/links?scope=all&add=1' : '/links?add=1'}
       class="bg-rose-600 hover:bg-rose-700 text-white rounded-xl px-5 py-2.5 text-sm font-medium flex items-center gap-1.5"
     >
       <Plus size={16} />
       Add Link
     </a>
+    </div>
   </header>
 
   <div class="space-y-10">
-    {[
-      { label: team?.name ?? '', icon: Users, grouped: teamGrouped, show: !!team && teamLinks.length > 0 },
-      { label: 'Org-wide', icon: Globe, grouped: orgGrouped, show: orgLinks.length > 0 },
-    ].filter((s) => s.show).map((scope) => (
+    {sections.map((sec) => (
     <div>
-      {(teamLinks.length > 0) && (
+      {showSectionHeaders && (
         <h2 class="text-lg font-semibold text-stone-900 flex items-center gap-2 mb-4 pb-2 border-b border-stone-200">
-          <scope.icon size={18} class={scope.label === 'Org-wide' ? 'text-stone-400' : 'text-rose-500'} /> {scope.label}
+          <sec.icon size={18} class={sec.key === 'org' ? 'text-stone-400' : 'text-rose-500'} /> {sec.label}
         </h2>
       )}
       <div class="space-y-8">
-    {Array.from(scope.grouped.entries()).map(([category, items]) => (
+    {Array.from(sec.grouped.entries()).map(([category, items]) => (
       <section>
         <h2 class="text-xs uppercase tracking-wider text-stone-500 font-semibold mb-3">{category}</h2>
         <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -118,7 +144,9 @@ const backWithEdit = (id: string) => `${Astro.url.pathname}?edit=${id}`;
     ))}
     {!links?.length && (
       <div class="bg-white border border-stone-200 rounded-xl px-4 py-12 text-center text-sm text-stone-400">
-        No links yet. Click "Add Link" to create one.
+        {scope === 'team' && team
+          ? <>No links for {team.name} yet. Click "Add Link" to create one, or <a href="/links?scope=all" class="text-rose-600 hover:underline">see all links</a>.</>
+          : <>No links yet. Click "Add Link" to create one.</>}
       </div>
     )}
   </div>

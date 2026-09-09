@@ -48,6 +48,7 @@
     { href: '/todos',     label: 'To-Dos',        icon: ListTodo,    match: (p: string) => p.startsWith('/todos') },
     { href: '/scorecard', label: 'Scorecard',     icon: ChartBar,    match: (p: string) => p.startsWith('/scorecard') },
     { href: '/focus',     label: 'Current Focus', icon: Focus,       match: (p: string) => p.startsWith('/focus') },
+    { href: '/links',     label: 'Links',         icon: Link2,       match: (p: string) => p.startsWith('/links') },
   ]);
 
   const allSecondary = [
@@ -58,7 +59,6 @@
     { href: '/posts',          label: 'Posts',                 icon: Newspaper,   always: true },
     { href: '/processes',      label: 'Processes',             icon: BookOpen,    always: true },
     { href: '/teams',          label: 'Teams & People',        icon: Users,       always: true },
-    { href: '/links',          label: 'Links',                 icon: Link2,       always: true },
     { href: '/trips',          label: 'Add a Trip',            icon: Plane,       always: true },
     { href: '/feature-ideas',  label: 'Feature Ideas',          icon: Lightbulb,   always: true },
   ];

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Settings, ListChecks, Contact, Newspaper, BookOpen, Users, Plane, Link2, Network, Wallet, Lightbulb, Code2 } from 'lucide-svelte';
+  import { Settings, ListChecks, Contact, Newspaper, BookOpen, Users, Plane, Network, Wallet, Lightbulb, Code2 } from 'lucide-svelte';
 
   let { canSeeExpenses = false } = $props<{ canSeeExpenses?: boolean }>();
   let open = $state(false);
@@ -35,7 +35,6 @@
     { href: '/posts',          label: 'Posts',                 icon: Newspaper,   always: true },
     { href: '/processes',      label: 'Processes',             icon: BookOpen,    always: true },
     { href: '/teams',          label: 'Teams & People',        icon: Users,       always: true },
-    { href: '/links',          label: 'Links',                 icon: Link2,       always: true },
     { href: '/trips',          label: 'Add a Trip',            icon: Plane,       always: true },
     { href: '/feature-ideas',  label: 'Feature Ideas',          icon: Lightbulb,   always: true },
     { href: '/docs/api',       label: 'API Docs',              icon: Code2,       always: true },
