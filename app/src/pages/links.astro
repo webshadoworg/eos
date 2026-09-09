@@ -1,24 +1,36 @@
 ---
 import AppLayout from '~/layouts/AppLayout.astro';
-import { Link2, Plus, Pencil, Trash2, X } from 'lucide-svelte';
+import { Link2, Plus, Pencil, Trash2, X, Users, Globe } from 'lucide-svelte';
 import { supabase } from '~/lib/supabase';
+import { isProjectTeam } from '~/lib/team';
 
 const url = Astro.url;
 const editId = url.searchParams.get('edit');
 const adding = url.searchParams.get('add') === '1';
+const team = Astro.locals.currentTeam;
+const allowedTeams = Astro.locals.allowedTeams;
 
-const { data: links } = await supabase
-  .from('links')
-  .select('*')
-  .order('title');
+// Org-wide links (team_id null) plus the current team's own links.
+let q = supabase.from('links').select('*').order('title');
+q = team ? q.or(`team_id.is.null,team_id.eq.${team.id}`) : q.is('team_id', null);
+const { data: links } = await q;
 
-const grouped = new Map<string, any[]>();
-for (const l of links ?? []) {
-  const key = l.category || 'Other';
-  if (!grouped.has(key)) grouped.set(key, []);
-  grouped.get(key)!.push(l);
-}
-const categories = Array.from(grouped.keys()).sort();
+const groupByCategory = (rows: any[]) => {
+  const grouped = new Map<string, any[]>();
+  for (const l of rows) {
+    const key = l.category || 'Other';
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key)!.push(l);
+  }
+  return new Map([...grouped.entries()].sort(([a], [b]) => a.localeCompare(b)));
+};
+const teamLinks = (links ?? []).filter((l: any) => l.team_id);
+const orgLinks = (links ?? []).filter((l: any) => !l.team_id);
+const teamGrouped = groupByCategory(teamLinks);
+const orgGrouped = groupByCategory(orgLinks);
+const categories = [...new Set((links ?? []).map((l: any) => l.category).filter(Boolean))].sort() as string[];
+// New links default to the current team when it is a project; otherwise org-wide.
+const defaultTeamId = team && isProjectTeam(team) ? team.id : '';
 
 let editing: any = null;
 if (editId) editing = (links ?? []).find((l) => l.id === editId) ?? null;
@@ -43,7 +55,7 @@ const backWithEdit = (id: string) => `${Astro.url.pathname}?edit=${id}`;
       </div>
       <div>
         <h1 class="text-2xl font-semibold text-stone-900">Links</h1>
-        <p class="text-stone-500 text-sm">Shared tools, docs, and shortcuts</p>
+        <p class="text-stone-500 text-sm">Shared tools, docs, and shortcuts{team && <> — org-wide and for <span class="text-stone-700 font-medium">{team.name}</span></>}</p>
       </div>
     </div>
     <a
@@ -55,8 +67,19 @@ const backWithEdit = (id: string) => `${Astro.url.pathname}?edit=${id}`;
     </a>
   </header>
 
-  <div class="space-y-8">
-    {Array.from(grouped.entries()).map(([category, items]) => (
+  <div class="space-y-10">
+    {[
+      { label: team?.name ?? '', icon: Users, grouped: teamGrouped, show: !!team && teamLinks.length > 0 },
+      { label: 'Org-wide', icon: Globe, grouped: orgGrouped, show: orgLinks.length > 0 },
+    ].filter((s) => s.show).map((scope) => (
+    <div>
+      {(teamLinks.length > 0) && (
+        <h2 class="text-lg font-semibold text-stone-900 flex items-center gap-2 mb-4 pb-2 border-b border-stone-200">
+          <scope.icon size={18} class={scope.label === 'Org-wide' ? 'text-stone-400' : 'text-rose-500'} /> {scope.label}
+        </h2>
+      )}
+      <div class="space-y-8">
+    {Array.from(scope.grouped.entries()).map(([category, items]) => (
       <section>
         <h2 class="text-xs uppercase tracking-wider text-stone-500 font-semibold mb-3">{category}</h2>
         <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -89,6 +112,9 @@ const backWithEdit = (id: string) => `${Astro.url.pathname}?edit=${id}`;
           })}
         </div>
       </section>
+    ))}
+      </div>
+    </div>
     ))}
     {!links?.length && (
       <div class="bg-white border border-stone-200 rounded-xl px-4 py-12 text-center text-sm text-stone-400">
@@ -129,6 +155,16 @@ const backWithEdit = (id: string) => `${Astro.url.pathname}?edit=${id}`;
               <textarea name="description" rows="2"
                 class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400"
               >{editing?.description ?? ''}</textarea>
+            </div>
+
+            <div>
+              <label class="text-sm font-medium text-stone-700">Scope</label>
+              <select name="team_id" class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm">
+                <option value="" selected={(editing ? (editing.team_id ?? '') : defaultTeamId) === ''}>Org-wide — everyone</option>
+                {allowedTeams.map((t) => (
+                  <option value={t.id} selected={(editing ? editing.team_id : defaultTeamId) === t.id}>{t.name}{t.kind === 'project' ? ' (project)' : ''}</option>
+                ))}
+              </select>
             </div>
 
             <div>
