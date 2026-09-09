@@ -9,7 +9,7 @@ export const GET: APIRoute = async ({ request }) => {
   const { data, error } = await supabase
     .from('teams')
     .select(`
-      id, name, description,
+      id, name, description, kind,
       memberships:team_memberships(
         role, role_description, display_order,
         employee:employees(id, full_name, email)
@@ -23,6 +23,7 @@ export const GET: APIRoute = async ({ request }) => {
     id: t.id,
     name: t.name,
     description: t.description,
+    kind: t.kind,
     members: (t.memberships ?? [])
       .filter((m: any) => m.employee)
       .sort((a: any, b: any) => (a.display_order ?? 0) - (b.display_order ?? 0))

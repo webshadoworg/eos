@@ -29,13 +29,14 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
     const team_id = String(form.get('team_id') ?? '') || null;
     const term_type = (String(form.get('term_type') ?? 'short_term')) as 'short_term' | 'long_term';
     const owner_employee_id = String(form.get('owner_employee_id') ?? '') || null;
+    const milestone_id = String(form.get('milestone_id') ?? '') || null;
     const description = String(form.get('description') ?? '') || null;
     const priorityRaw = form.get('priority');
     const priority = priorityRaw ? Number(priorityRaw) : 3;
     if (!title) return redirect(back);
     if (!canAccessTeam(locals, team_id)) return new Response('Forbidden', { status: 403 });
     const { error } = await supabase.from('issues').insert({
-      title, team_id, term_type, owner_employee_id, status: 'open',
+      title, team_id, term_type, owner_employee_id, milestone_id, status: 'open',
       priority, description,
     });
     if (error) return new Response(`Error: ${error.message}`, { status: 500 });
@@ -56,6 +57,7 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
       priority: Number(form.get('priority') ?? 3),
       term_type: String(form.get('term_type') ?? 'short_term'),
     };
+    if (form.has('milestone_id')) patch.milestone_id = String(form.get('milestone_id') ?? '') || null;
     const status = form.get('status');
     if (status) patch.status = String(status);
     const { error } = await supabase.from('issues').update(patch).eq('id', id);
@@ -111,7 +113,7 @@ export const PUT: APIRoute = async ({ request, locals }) => {
   return new Response(null, { status: 204 });
 };
 
-const ISSUE_PATCH_FIELDS = new Set(['status', 'description', 'title', 'priority', 'term_type', 'team_id', 'owner_employee_id']);
+const ISSUE_PATCH_FIELDS = new Set(['status', 'description', 'title', 'priority', 'term_type', 'team_id', 'owner_employee_id', 'milestone_id']);
 
 export const PATCH: APIRoute = async ({ request, locals }) => {
   const body = await request.json();

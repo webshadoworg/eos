@@ -17,9 +17,10 @@ const currentTeam = Astro.locals.currentTeam;
 const canSeeExpenses = canAccessExpenses(Astro.locals);
 const backPath = Astro.url.pathname + Astro.url.search;
 
+const isProject = currentTeam?.kind === 'project';
 const nav = [
   { href: '/vto',       label: 'V/TO',          icon: Eye },
-  { href: '/rocks',     label: 'Rocks',         icon: Target },
+  { href: '/rocks',     label: isProject ? 'Milestones' : 'Rocks', icon: Target },
   { href: '/issues',    label: 'Issues',        icon: AlertCircle },
   { href: '/todos',     label: 'To-Dos',        icon: ListTodo },
   { href: '/scorecard', label: 'Scorecard',     icon: ChartBar },
@@ -50,6 +51,7 @@ const initials = (n: string) =>
             userName={user?.fullName || user?.email || ''}
             backPath={backPath}
             canSeeExpenses={canSeeExpenses}
+            rocksLabel={isProject ? 'Milestones' : 'Rocks'}
           />
         </div>
 

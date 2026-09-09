@@ -4,9 +4,11 @@ import StatusCheckbox from '~/components/StatusCheckbox.svelte';
 import RichTextEditor from '~/components/RichTextEditor.svelte';
 import { AlertCircle, Plus, Search, Zap, Clock, Target, Archive, X, Trash2, Copy, Share2 } from 'lucide-svelte';
 import { supabase } from '~/lib/supabase';
+import { isProjectTeam } from '~/lib/team';
 const team = Astro.locals.currentTeam;
 const teams = Astro.locals.allowedTeams;
 if (!team) return Astro.redirect('/');
+const isProject = isProjectTeam(team);
 
 const url = Astro.url;
 const term = (url.searchParams.get('term') as 'short_term' | 'long_term') || 'short_term';
@@ -15,15 +17,19 @@ const ownerFilter = url.searchParams.get('owner') ?? 'all';
 const sort = url.searchParams.get('sort') ?? 'manual';
 const search = (url.searchParams.get('q') ?? '').trim();
 const detailId = url.searchParams.get('detail');
+const milestoneFilter = isProject ? (url.searchParams.get('milestone') ?? 'all') : 'all';
 
 const issueSelect =
-  'id, title, description, status, priority, priority_order, term_type, team_id, created_at, owner_employee_id, ' +
-  'owner:employees!issues_owner_employee_id_fkey(id, full_name)';
+  'id, title, description, status, priority, priority_order, term_type, team_id, created_at, owner_employee_id, milestone_id, ' +
+  'owner:employees!issues_owner_employee_id_fkey(id, full_name), ' +
+  'milestone:milestones(id, title)';
 
 const applyFilters = (q: any) => {
   if (statusFilter === 'active') q = q.in('status', ['open', 'solved']);
   else if (statusFilter !== 'all') q = q.eq('status', statusFilter);
   if (ownerFilter !== 'all') q = q.eq('owner_employee_id', ownerFilter);
+  if (milestoneFilter === 'none') q = q.is('milestone_id', null);
+  else if (milestoneFilter !== 'all') q = q.eq('milestone_id', milestoneFilter);
   if (search) q = q.ilike('title', `%${search}%`);
   if (sort === 'priority') q = q.order('priority', { ascending: true });
   else if (sort === 'created') q = q.order('created_at', { ascending: false });
@@ -35,11 +41,16 @@ const ownedQ = applyFilters(
   supabase.from('issues').select(issueSelect).eq('team_id', team.id).eq('term_type', term)
 );
 
-const [ownedResult, employeesResult, shareLinksResult] = await Promise.all([
+const [ownedResult, employeesResult, shareLinksResult, milestonesResult] = await Promise.all([
   ownedQ,
   supabase.from('team_memberships').select('employee:employees(id, full_name)').eq('team_id', team.id).order('employee(full_name)'),
   supabase.from('issue_shares').select('issue_id').eq('team_id', team.id),
+  isProject
+    ? supabase.from('milestones').select('id, title').eq('team_id', team.id).eq('is_archived', false)
+        .order('due_date', { ascending: true, nullsFirst: false }).order('priority_order')
+    : Promise.resolve({ data: [] as any[] }),
 ]);
+const milestones: any[] = milestonesResult.data ?? [];
 
 const employees = (employeesResult.data ?? []).map((m: any) => m.employee).filter(Boolean);
 const ownedIssues = (ownedResult.data ?? []).map((i: any) => ({ ...i, isSharedIssue: false }));
@@ -156,10 +167,16 @@ const backNoDetail = url.pathname + (url.search ? url.search.replace(/[?&]detail
     <input
       type="text"
       name="title"
-      placeholder="Add a new issue..."
+      placeholder={isProject ? 'Add a question or problem...' : 'Add a new issue...'}
       required
       class="flex-1 bg-white border border-stone-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-violet-400"
     />
+    {isProject && (
+      <select name="milestone_id" class="bg-white border border-stone-200 rounded-xl px-3 py-3 text-sm max-w-[220px]">
+        <option value="">No milestone</option>
+        {milestones.map((m: any) => <option value={m.id} selected={m.id === milestoneFilter}>{m.title}</option>)}
+      </select>
+    )}
     <button class="bg-stone-800 hover:bg-stone-900 text-white rounded-xl px-5 py-3 text-sm font-medium flex items-center gap-1.5">
       <Plus size={16} />
       Add
@@ -188,6 +205,13 @@ const backNoDetail = url.pathname + (url.search ? url.search.replace(/[?&]detail
       <option value="all" selected={ownerFilter === 'all'}>All People</option>
       {employees?.map((e) => <option value={e.id} selected={ownerFilter === e.id}>{e.full_name}</option>)}
     </select>
+    {isProject && (
+      <select name="milestone" onchange="this.form.submit()" class="bg-white border border-stone-200 rounded-xl px-4 py-2.5 text-sm max-w-[220px]">
+        <option value="all"  selected={milestoneFilter === 'all'}>All Milestones</option>
+        <option value="none" selected={milestoneFilter === 'none'}>No milestone</option>
+        {milestones.map((m: any) => <option value={m.id} selected={milestoneFilter === m.id}>{m.title}</option>)}
+      </select>
+    )}
     <select name="sort" onchange="this.form.submit()" class="bg-white border border-stone-200 rounded-xl px-4 py-2.5 text-sm">
       <option value="manual"   selected={sort === 'manual'}>Manual Order</option>
       <option value="priority" selected={sort === 'priority'}>Priority</option>
@@ -226,6 +250,9 @@ const backNoDetail = url.pathname + (url.search ? url.search.replace(/[?&]detail
               <span class="text-xs font-medium text-sky-600 bg-sky-50 border border-sky-200 rounded px-2 py-0.5 shrink-0 whitespace-nowrap">
                 From {i.originTeam.name}
               </span>
+            )}
+            {isProject && i.milestone && (
+              <span class="hidden md:inline text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 truncate max-w-[180px]" title={i.milestone.title}>{i.milestone.title}</span>
             )}
             {i.owner && (
               <div class="w-7 h-7 rounded-full bg-stone-100 text-stone-600 grid place-items-center text-[10px] font-semibold" title={i.owner.full_name}>
@@ -392,6 +419,16 @@ const backNoDetail = url.pathname + (url.search ? url.search.replace(/[?&]detail
                     {employees?.map((e) => <option value={e.id} selected={e.id === detail.owner_employee_id}>{e.full_name}</option>)}
                   </select>
                 </div>
+
+                {isProject && (
+                  <div>
+                    <label class="text-sm font-medium text-stone-700">Milestone</label>
+                    <select name="milestone_id" data-autosave="milestone_id" class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm">
+                      <option value="">No milestone</option>
+                      {milestones.map((m: any) => <option value={m.id} selected={m.id === detail.milestone_id}>{m.title}</option>)}
+                    </select>
+                  </div>
+                )}
 
                 <div>
                   <label class="text-sm font-medium text-stone-700">Term</label>
@@ -605,7 +642,7 @@ const backNoDetail = url.pathname + (url.search ? url.search.replace(/[?&]detail
       form.querySelectorAll<HTMLElement>('[data-autosave]').forEach(el => {
         const field = el.dataset.autosave!;
         if (el instanceof HTMLSelectElement) {
-          el.addEventListener('change', () => doSave(field, el.value));
+          el.addEventListener('change', () => doSave(field, el.value || null));
         } else if (el instanceof HTMLInputElement) {
           if (el.type === 'checkbox') {
             el.addEventListener('change', () => doSave(field, el.checked));

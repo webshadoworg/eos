@@ -16,6 +16,7 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
     const title = String(form.get('title') ?? '').trim();
     const team_id = String(form.get('team_id') ?? '') || null;
     const assignee_employee_id = String(form.get('assignee_employee_id') ?? '') || null;
+    const milestone_id = String(form.get('milestone_id') ?? '') || null;
     const description = String(form.get('description') ?? '') || null;
     const is_urgent = form.get('is_urgent') === 'on' || form.get('is_urgent') === 'true';
     let due_date = String(form.get('due_date') ?? '') || null;
@@ -27,7 +28,7 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
     if (!title) return redirect(back);
     if (!canAccessTeam(locals, team_id)) return new Response('Forbidden', { status: 403 });
     const { error } = await supabase.from('todos').insert({
-      title, team_id, assignee_employee_id, status: 'open',
+      title, team_id, assignee_employee_id, milestone_id, status: 'open',
       description, due_date, is_urgent,
     });
     if (error) return new Response(`Error: ${error.message}`, { status: 500 });
@@ -38,18 +39,27 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
     const id = String(form.get('id') ?? '');
     if (!id) return new Response('id required', { status: 400 });
     if (!(await assertTodoTeamAccess(id, locals))) return new Response('Forbidden', { status: 403 });
-    const new_team_id = String(form.get('team_id') ?? '') || null;
-    if (!canAccessTeam(locals, new_team_id)) return new Response('Forbidden', { status: 403 });
-    const patch: any = {
-      title: String(form.get('title') ?? '').trim(),
-      description: String(form.get('description') ?? '') || null,
-      team_id: new_team_id,
-      assignee_employee_id: String(form.get('assignee_employee_id') ?? '') || null,
-      due_date: String(form.get('due_date') ?? '') || null,
-      is_urgent: form.get('is_urgent') === 'on',
-    };
+    // Only touch fields the form actually sent. List-row forms post just
+    // title + status; the detail form posts everything (it always carries
+    // due_date, which is how we tell — an unchecked checkbox is never sent).
+    const patch: any = {};
+    const has = (k: string) => form.has(k);
+    if (has('title')) patch.title = String(form.get('title') ?? '').trim();
+    if (has('description')) patch.description = String(form.get('description') ?? '') || null;
+    if (has('team_id')) {
+      const new_team_id = String(form.get('team_id') ?? '') || null;
+      if (!canAccessTeam(locals, new_team_id)) return new Response('Forbidden', { status: 403 });
+      patch.team_id = new_team_id;
+    }
+    if (has('assignee_employee_id')) patch.assignee_employee_id = String(form.get('assignee_employee_id') ?? '') || null;
+    if (has('milestone_id')) patch.milestone_id = String(form.get('milestone_id') ?? '') || null;
+    if (has('due_date')) {
+      patch.due_date = String(form.get('due_date') ?? '') || null;
+      patch.is_urgent = form.get('is_urgent') === 'on';
+    }
     const status = form.get('status');
     if (status) patch.status = String(status);
+    if (Object.keys(patch).length === 0) return redirect(back);
     const { error } = await supabase.from('todos').update(patch).eq('id', id);
     if (error) return new Response(`Error: ${error.message}`, { status: 500 });
     return redirect(back);
@@ -77,7 +87,7 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
 };
 
 // PATCH accepts a partial update; only whitelisted fields are applied.
-const TODO_PATCH_FIELDS = new Set(['status', 'description', 'title', 'is_urgent', 'due_date', 'team_id', 'assignee_employee_id']);
+const TODO_PATCH_FIELDS = new Set(['status', 'description', 'title', 'is_urgent', 'due_date', 'team_id', 'assignee_employee_id', 'milestone_id']);
 
 export const PATCH: APIRoute = async ({ request, locals }) => {
   const body = await request.json();

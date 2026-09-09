@@ -2,25 +2,43 @@
 import AppLayout from '~/layouts/AppLayout.astro';
 import StatusCheckbox from '~/components/StatusCheckbox.svelte';
 import RichTextEditor from '~/components/RichTextEditor.svelte';
-import { CheckSquare, Plus, Search, Flag, X, Trash2, Archive, Copy } from 'lucide-svelte';
+import { CheckSquare, Plus, Search, Flag, X, Trash2, Archive, Copy, Calendar, User } from 'lucide-svelte';
 import { supabase } from '~/lib/supabase';
+import { isProjectTeam } from '~/lib/team';
 const team = Astro.locals.currentTeam;
 const teams = Astro.locals.allowedTeams;
 if (!team) return Astro.redirect('/');
 
+// Project teams get the richer view: to-dos grouped by milestone, date filters.
+const isProject = isProjectTeam(team);
+
 const url = Astro.url;
 const statusFilter = url.searchParams.get('status') ?? 'active'; // active | open | done | archived | all
 const assigneeFilter = url.searchParams.get('assignee') ?? 'all';
-const sort = url.searchParams.get('sort') ?? 'created';
+const sort = url.searchParams.get('sort') ?? (isProject ? 'due' : 'created');
 const search = (url.searchParams.get('q') ?? '').trim();
 const detailId = url.searchParams.get('detail');
+// Project-only filters
+const milestoneFilter = isProject ? (url.searchParams.get('milestone') ?? 'all') : 'all'; // all | none | <id>
+const dueFilter = isProject ? (url.searchParams.get('due') ?? 'all') : 'all'; // all | overdue | today | week | next7 | nodate | range
+const dueFrom = url.searchParams.get('from') ?? '';
+const dueTo = url.searchParams.get('to') ?? '';
+const group = isProject ? (url.searchParams.get('group') ?? 'milestone') : 'none'; // milestone | owner | none
+
+const ymd = (d: Date) => d.toISOString().slice(0, 10);
+const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const now = new Date();
+const todayYmd = ymd(now);
+const weekStart = addDays(now, -now.getDay());       // Sunday
+const weekEnd = addDays(weekStart, 6);               // Saturday
 
 const baseQuery = () =>
   supabase
     .from('todos')
     .select(
-      'id, title, description, status, is_urgent, due_date, created_at, team_id, assignee_employee_id, ' +
-      'assignee:employees!todos_assignee_employee_id_fkey(id, full_name, email)',
+      'id, title, description, status, is_urgent, due_date, created_at, team_id, assignee_employee_id, milestone_id, ' +
+      'assignee:employees!todos_assignee_employee_id_fkey(id, full_name, email), ' +
+      'milestone:milestones(id, title, due_date, status)',
     )
     .eq('team_id', team.id);
 
@@ -28,17 +46,59 @@ let q = baseQuery();
 if (statusFilter === 'active') q = q.in('status', ['open', 'done']);
 else if (statusFilter !== 'all') q = q.eq('status', statusFilter);
 if (assigneeFilter !== 'all') q = q.eq('assignee_employee_id', assigneeFilter);
+if (milestoneFilter === 'none') q = q.is('milestone_id', null);
+else if (milestoneFilter !== 'all') q = q.eq('milestone_id', milestoneFilter);
+if (dueFilter === 'overdue') q = q.lt('due_date', todayYmd).neq('status', 'done');
+else if (dueFilter === 'today') q = q.eq('due_date', todayYmd);
+else if (dueFilter === 'week') q = q.gte('due_date', ymd(weekStart)).lte('due_date', ymd(weekEnd));
+else if (dueFilter === 'next7') q = q.gte('due_date', todayYmd).lte('due_date', ymd(addDays(now, 7)));
+else if (dueFilter === 'nodate') q = q.is('due_date', null);
+else if (dueFilter === 'range') {
+  if (dueFrom) q = q.gte('due_date', dueFrom);
+  if (dueTo) q = q.lte('due_date', dueTo);
+}
 if (search) q = q.ilike('title', `%${search}%`);
-if (sort === 'due') q = q.order('due_date', { ascending: true, nullsFirst: false });
+if (sort === 'due') q = q.order('due_date', { ascending: true, nullsFirst: false }).order('created_at', { ascending: true });
 else if (sort === 'title') q = q.order('title', { ascending: true });
 else q = q.order('created_at', { ascending: false });
 
-const [{ data: todos }, { data: employees }] = await Promise.all([
+const [{ data: todos }, { data: employees }, { data: milestones }] = await Promise.all([
   q,
   supabase.from('team_memberships').select('employee:employees(id, full_name)').eq('team_id', team.id).order('employee(full_name)').then(({ data }) => ({
     data: (data ?? []).map((m: any) => m.employee).filter(Boolean),
   })),
+  isProject
+    ? supabase.from('milestones').select('id, title, due_date, status').eq('team_id', team.id).eq('is_archived', false)
+        .order('due_date', { ascending: true, nullsFirst: false }).order('priority_order')
+    : Promise.resolve({ data: [] as any[] }),
 ]);
+
+// Group rows for display. Standard teams: one flat group with no header.
+type Group = { key: string; title: string | null; meta: any; todos: any[] };
+const todoList: any[] = (todos ?? []) as any[];
+let groups: Group[];
+if (group === 'milestone') {
+  const byId = new Map<string, Group>();
+  for (const m of milestones ?? []) byId.set(m.id, { key: m.id, title: m.title, meta: m, todos: [] });
+  const none: Group = { key: 'none', title: 'No milestone', meta: null, todos: [] };
+  for (const t of todoList) {
+    const g = t.milestone_id ? byId.get(t.milestone_id) : null;
+    (g ?? none).todos.push(t);
+  }
+  groups = [...byId.values(), none].filter((g) => g.todos.length > 0);
+} else if (group === 'owner') {
+  const byOwner = new Map<string, Group>();
+  for (const t of todoList) {
+    const key = t.assignee?.id ?? 'none';
+    if (!byOwner.has(key)) byOwner.set(key, { key, title: t.assignee?.full_name ?? 'Unassigned', meta: null, todos: [] });
+    byOwner.get(key)!.todos.push(t);
+  }
+  groups = [...byOwner.values()].sort((a, b) => (a.key === 'none' ? 1 : b.key === 'none' ? -1 : a.title!.localeCompare(b.title!)));
+} else {
+  groups = [{ key: 'all', title: null, meta: null, todos: todoList }];
+}
+const openCount = todoList.filter((t) => t.status === 'open').length;
+const overdueCount = todoList.filter((t) => t.status === 'open' && t.due_date && t.due_date < todayYmd).length;
 
 let detail: any = null;
 if (detailId) {
@@ -48,8 +108,21 @@ if (detailId) {
 
 const fmt = (d: string | null) =>
   d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
-const todayYmd = new Date().toISOString().slice(0, 10);
 const isOverdue = (d: string | null) => !!d && d <= todayYmd;
+const milestoneStatusStyles: Record<string, string> = {
+  on_track: 'bg-sky-50 text-sky-700 border-sky-200',
+  off_track: 'bg-rose-50 text-rose-700 border-rose-200',
+  done: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+};
+const milestoneStatusLabel: Record<string, string> = { on_track: 'On Track', off_track: 'Off Track', done: 'Done' };
+// Filter-form link helper: current params with one key changed.
+const withParam = (k: string, v: string | null) => {
+  const p = new URLSearchParams(url.searchParams);
+  p.delete('detail');
+  if (v === null || v === '') p.delete(k); else p.set(k, v);
+  const qs = p.toString();
+  return url.pathname + (qs ? `?${qs}` : '');
+};
 const initials = (name: string) =>
   name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
 const back = Astro.url.pathname + Astro.url.search;
@@ -63,7 +136,11 @@ const backNoDetail = Astro.url.pathname + (Astro.url.search ? Astro.url.search.r
       </div>
       <div>
         <h1 class="text-2xl font-semibold text-stone-900">To-Dos</h1>
-        <p class="text-stone-500 text-sm">{team.name} team to-dos</p>
+        <p class="text-stone-500 text-sm">
+          {isProject
+            ? <>{team.name} · project tasks by milestone — <span class="text-stone-700 font-medium">{openCount} open</span>{overdueCount > 0 && <>, <span class="text-rose-600 font-medium">{overdueCount} overdue</span></>}</>
+            : <>{team.name} team to-dos</>}
+        </p>
       </div>
     </div>
     <form
@@ -95,18 +172,53 @@ const backNoDetail = Astro.url.pathname + (Astro.url.search ? Astro.url.search.r
       required
       class="flex-1 bg-white border border-stone-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-violet-400"
     />
+    {isProject && (
+      <select name="milestone_id" class="bg-white border border-stone-200 rounded-xl px-3 py-3 text-sm max-w-[220px]">
+        <option value="" selected={milestoneFilter === 'all' || milestoneFilter === 'none'}>No milestone</option>
+        {milestones?.map((m: any) => <option value={m.id} selected={m.id === milestoneFilter}>{m.title}</option>)}
+      </select>
+    )}
     <select name="assignee_employee_id" class="bg-white border border-stone-200 rounded-xl px-3 py-3 text-sm">
       <option value="">Unassigned</option>
-      {employees?.map((e) => <option value={e.id}>{e.full_name}</option>)}
+      {employees?.map((e) => <option value={e.id} selected={isProject && e.id === assigneeFilter}>{e.full_name}</option>)}
     </select>
+    {isProject && (
+      <input type="date" name="due_date" title="Due date" class="bg-white border border-stone-200 rounded-xl px-3 py-3 text-sm" />
+    )}
     <button class="bg-stone-800 hover:bg-stone-900 text-white rounded-xl px-5 py-3 text-sm font-medium flex items-center gap-1.5">
       <Plus size={16} />
       Add
     </button>
   </form>
 
-  <form method="GET" class="flex gap-2 mb-4">
-    <div class="flex-1 relative">
+  {isProject && (
+    <div class="flex flex-wrap items-center gap-2 mb-3 text-sm">
+      <span class="text-xs text-stone-400 mr-1">Due</span>
+      {([
+        ['all', 'All'], ['overdue', 'Overdue'], ['today', 'Today'], ['week', 'This week'], ['next7', 'Next 7 days'], ['nodate', 'No date'], ['range', 'Range…'],
+      ] as const).map(([v, label]) => (
+        <a href={withParam('due', v === 'all' ? null : v)}
+          class={`px-3 py-1.5 rounded-full border text-xs font-medium transition ${
+            dueFilter === v ? 'bg-violet-600 border-violet-600 text-white' : 'bg-white border-stone-200 text-stone-600 hover:border-stone-300'
+          }`}>{label}</a>
+      ))}
+      {dueFilter === 'range' && (
+        <form method="GET" class="flex items-center gap-1.5 ml-1">
+          {[...url.searchParams.entries()].filter(([k]) => !['from', 'to', 'detail'].includes(k)).map(([k, v]) => <input type="hidden" name={k} value={v} />)}
+          <input type="date" name="from" value={dueFrom} class="bg-white border border-stone-200 rounded-lg px-2 py-1 text-xs" />
+          <span class="text-stone-400 text-xs">to</span>
+          <input type="date" name="to" value={dueTo} class="bg-white border border-stone-200 rounded-lg px-2 py-1 text-xs" />
+          <button class="text-xs bg-stone-800 text-white rounded-lg px-2.5 py-1">Go</button>
+        </form>
+      )}
+    </div>
+  )}
+
+  <form method="GET" class="flex flex-wrap gap-2 mb-4">
+    {isProject && dueFilter !== 'all' && <input type="hidden" name="due" value={dueFilter} />}
+    {isProject && dueFrom && <input type="hidden" name="from" value={dueFrom} />}
+    {isProject && dueTo && <input type="hidden" name="to" value={dueTo} />}
+    <div class="flex-1 min-w-[200px] relative">
       <Search size={16} class="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" />
       <input
         type="text"
@@ -127,16 +239,49 @@ const backNoDetail = Astro.url.pathname + (Astro.url.search ? Astro.url.search.r
       <option value="all" selected={assigneeFilter === 'all'}>All Assignees</option>
       {employees?.map((e) => <option value={e.id} selected={assigneeFilter === e.id}>{e.full_name}</option>)}
     </select>
+    {isProject && (
+      <select name="milestone" onchange="this.form.submit()" class="bg-white border border-stone-200 rounded-xl px-4 py-2.5 text-sm max-w-[220px]">
+        <option value="all"  selected={milestoneFilter === 'all'}>All Milestones</option>
+        <option value="none" selected={milestoneFilter === 'none'}>No milestone</option>
+        {milestones?.map((m: any) => <option value={m.id} selected={milestoneFilter === m.id}>{m.title}</option>)}
+      </select>
+    )}
     <select name="sort" onchange="this.form.submit()" class="bg-white border border-stone-200 rounded-xl px-4 py-2.5 text-sm">
       <option value="created" selected={sort === 'created'}>Created Date</option>
       <option value="due"     selected={sort === 'due'}>Due Date</option>
       <option value="title"   selected={sort === 'title'}>Title</option>
     </select>
+    {isProject && (
+      <select name="group" onchange="this.form.submit()" class="bg-white border border-stone-200 rounded-xl px-4 py-2.5 text-sm">
+        <option value="milestone" selected={group === 'milestone'}>Group: Milestone</option>
+        <option value="owner"     selected={group === 'owner'}>Group: Owner</option>
+        <option value="none"      selected={group === 'none'}>No grouping</option>
+      </select>
+    )}
   </form>
 
-  <div class="bg-white border border-stone-200 rounded-xl divide-y divide-stone-100">
-    {todos && todos.length > 0 ? (
-      todos.map((t: any) => {
+  <div class="space-y-4">
+    {todos && todos.length > 0 ? groups.map((g) => (
+      <section>
+        {g.title !== null && (
+          <div class="flex items-center gap-3 px-1 mb-2">
+            {group === 'milestone' ? <Flag size={15} class="text-amber-500 shrink-0" /> : <User size={15} class="text-stone-400 shrink-0" />}
+            {g.meta ? (
+              <a href={`/rocks?milestone=${g.meta.id}`} class="font-semibold text-stone-900 hover:text-violet-700">{g.title}</a>
+            ) : (
+              <span class="font-semibold text-stone-700">{g.title}</span>
+            )}
+            {g.meta && (
+              <span class={`text-[11px] px-2 py-0.5 rounded-full border ${milestoneStatusStyles[g.meta.status] ?? ''}`}>{milestoneStatusLabel[g.meta.status] ?? g.meta.status}</span>
+            )}
+            {g.meta?.due_date && (
+              <span class={`text-xs flex items-center gap-1 ${isOverdue(g.meta.due_date) && g.meta.status !== 'done' ? 'text-rose-500' : 'text-stone-500'}`}><Calendar size={12} /> {fmt(g.meta.due_date)}</span>
+            )}
+            <span class="text-xs text-stone-400">{g.todos.filter((t: any) => t.status === 'open').length} open · {g.todos.length} total</span>
+          </div>
+        )}
+        <div class="bg-white border border-stone-200 rounded-xl divide-y divide-stone-100">
+      {g.todos.map((t: any) => {
         const done = t.status === 'done';
         const detailHref = `?${new URLSearchParams({ ...Object.fromEntries(url.searchParams), detail: t.id }).toString()}`;
         return (
@@ -149,7 +294,10 @@ const backNoDetail = Astro.url.pathname + (Astro.url.search ? Astro.url.search.r
               {t.title}
             </a>
             {t.is_urgent && <Flag size={14} class="text-rose-500" />}
-            {t.due_date && <span class={`text-xs font-medium ${isOverdue(t.due_date) ? 'text-rose-500' : 'text-stone-500'}`}>{fmt(t.due_date)}</span>}
+            {isProject && group !== 'milestone' && t.milestone && (
+              <span class="hidden md:inline text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 truncate max-w-[180px]" title={t.milestone.title}>{t.milestone.title}</span>
+            )}
+            {t.due_date && <span class={`text-xs font-medium ${isOverdue(t.due_date) && !done ? 'text-rose-500' : 'text-stone-500'}`}>{fmt(t.due_date)}</span>}
             {t.assignee && (
               <div class="flex items-center gap-1.5 text-xs text-stone-500">
                 <div class="w-6 h-6 rounded-full bg-violet-100 text-violet-700 grid place-items-center text-[10px] font-semibold">
@@ -158,7 +306,7 @@ const backNoDetail = Astro.url.pathname + (Astro.url.search ? Astro.url.search.r
                 <span class="text-stone-600 font-medium">{t.assignee.full_name.split(' ')[0]}</span>
               </div>
             )}
-            <div class="text-xs text-stone-400 w-12 text-right">{fmt(t.created_at)}</div>
+            {!isProject && <div class="text-xs text-stone-400 w-12 text-right">{fmt(t.created_at)}</div>}
             <form method="POST" action="/api/todos" class="opacity-0 group-hover:opacity-100 transition">
               <input type="hidden" name="_action" value="update" />
               <input type="hidden" name="id" value={t.id} />
@@ -174,9 +322,11 @@ const backNoDetail = Astro.url.pathname + (Astro.url.search ? Astro.url.search.r
             </form>
           </div>
         );
-      })
-    ) : (
-      <div class="px-4 py-12 text-center text-sm text-stone-400">No to-dos matching the filters.</div>
+      })}
+        </div>
+      </section>
+    )) : (
+      <div class="bg-white border border-stone-200 rounded-xl px-4 py-12 text-center text-sm text-stone-400">No to-dos matching the filters.</div>
     )}
   </div>
 
@@ -268,6 +418,16 @@ const backNoDetail = Astro.url.pathname + (Astro.url.search ? Astro.url.search.r
               </select>
             </div>
 
+            {isProject && (
+              <div>
+                <label class="text-sm font-medium text-stone-700">Milestone</label>
+                <select name="milestone_id" data-autosave="milestone_id" class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm">
+                  <option value="">No milestone</option>
+                  {milestones?.map((m: any) => <option value={m.id} selected={m.id === detail.milestone_id}>{m.title}</option>)}
+                </select>
+              </div>
+            )}
+
             <div>
               <label class="text-sm font-medium text-stone-700">Assignee</label>
               <select name="assignee_employee_id" data-autosave="assignee_employee_id" class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm">
@@ -305,6 +465,7 @@ const backNoDetail = Astro.url.pathname + (Astro.url.search ? Astro.url.search.r
               </div>
               <input type="hidden" name="_action" value="create" />
               <input type="hidden" name="back" value={backNoDetail} />
+              {isProject && detail.milestone_id && <input type="hidden" name="milestone_id" value={detail.milestone_id} />}
               <div>
                 <label class="text-sm font-medium text-stone-700">Title</label>
                 <input type="text" name="title" value={`${detail.title} (copy)`} required
@@ -447,7 +608,7 @@ const backNoDetail = Astro.url.pathname + (Astro.url.search ? Astro.url.search.r
       form.querySelectorAll<HTMLElement>('[data-autosave]').forEach(el => {
         const field = el.dataset.autosave!;
         if (el instanceof HTMLSelectElement) {
-          el.addEventListener('change', () => doSave(field, el.value));
+          el.addEventListener('change', () => doSave(field, el.value || null));
         } else if (el instanceof HTMLInputElement) {
           if (el.type === 'checkbox') {
             el.addEventListener('change', () => doSave(field, el.checked));

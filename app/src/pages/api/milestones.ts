@@ -2,7 +2,8 @@ import type { APIRoute } from 'astro';
 import { supabase } from '~/lib/supabase';
 import { canAccessTeam } from '~/lib/team';
 
-// Milestones live under a rock but carry their own team_id + owner.
+// Milestones live under a rock (standard teams) or stand alone under a
+// project team (rock_id null). Either way they carry their own team_id + owner.
 // Writes are team-gated: if a milestone has a team_id, the caller must be a member.
 // Milestones with a null team_id behave like org-wide items (any authenticated user).
 
@@ -20,7 +21,7 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
     const title = String(form.get('title') ?? '').trim();
     const rock_id = String(form.get('rock_id') ?? '') || null;
     const team_id = String(form.get('team_id') ?? '') || null;
-    if (!title || !rock_id) return redirect(back);
+    if (!title) return redirect(back);
     if (!canAccessTeam(locals, team_id)) return new Response('Forbidden', { status: 403 });
     const { error } = await supabase.from('milestones').insert({
       title,
@@ -64,7 +65,7 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
   return new Response('unknown action', { status: 400 });
 };
 
-const MILESTONE_PATCH_FIELDS = new Set(['status', 'description', 'title', 'due_date', 'owner_employee_id']);
+const MILESTONE_PATCH_FIELDS = new Set(['status', 'description', 'title', 'due_date', 'owner_employee_id', 'priority_order']);
 
 export const PATCH: APIRoute = async ({ request, locals }) => {
   const body = await request.json();

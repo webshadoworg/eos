@@ -14,7 +14,7 @@ interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
 
-type TeamRecord = { id: string; name: string; description: string | null };
+type TeamRecord = { id: string; name: string; description: string | null; kind: 'standard' | 'project' };
 
 declare namespace App {
   interface Locals {

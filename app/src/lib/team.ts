@@ -8,12 +8,15 @@ import { isSystemAdmin } from './permissions';
 
 const COOKIE = 'gye_team';
 
-export type Team = { id: string; name: string; description: string | null };
+export type TeamKind = 'standard' | 'project';
+export type Team = { id: string; name: string; description: string | null; kind: TeamKind };
+
+export const isProjectTeam = (t: { kind?: TeamKind | null } | null | undefined) => t?.kind === 'project';
 
 export async function fetchAllowedTeams(employeeId: string): Promise<Team[]> {
   const { data, error } = await supabase
     .from('team_memberships')
-    .select('team:teams(id, name, description)')
+    .select('team:teams(id, name, description, kind)')
     .eq('employee_id', employeeId);
   if (error) throw error;
   const teams = ((data ?? []) as any[])

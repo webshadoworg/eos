@@ -27,14 +27,17 @@ Valid keys come from the `API_KEYS` environment variable on the server — a com
 |---|---|---|
 | GET | `/api/v1/employees` | List employees. Optional `?email=` filter. |
 | GET | `/api/v1/contacts` | Optional `?q=` name search, `?category=`, `?employee_id=`. |
-| GET | `/api/v1/teams` | List teams with members. |
+| GET | `/api/v1/teams` | List teams with members. Each team carries `kind`: `standard` or `project`. |
 | GET | `/api/v1/rocks` | List non-archived rocks with milestones and quarter. |
+| GET | `/api/v1/milestones` | Optional `?team_id=` / `?team_name=`, `?include_archived=1`. Each carries `todo_counts`. |
+| POST | `/api/v1/milestones` | Create a milestone (standalone under a project team, or under a rock). |
+| PATCH | `/api/v1/milestones` | Update title, description, owner, due date, status, archive flag. |
 | GET | `/api/v1/issues` | Optional `?assignee=<email>`, `?team_id=`, `?status=`, `?term=short_term\|long_term`. |
 | POST | `/api/v1/issues` | Create an issue. |
 | PATCH | `/api/v1/issues` | Mark an issue solved/open. |
-| GET | `/api/v1/todos` | Optional `?assignee=<email>`, `?team_id=`, `?status=open\|done\|archived\|all` (default `open`). |
-| POST | `/api/v1/todos` | Create a todo. |
-| PATCH | `/api/v1/todos` | Mark a todo done/open. |
+| GET | `/api/v1/todos` | Optional `?assignee=<email>`, `?team_id=` / `?team_name=`, `?milestone_id=`, `?status=open\|done\|archived\|all` (default `open`). |
+| POST | `/api/v1/todos` | Create a todo, optionally under a milestone. |
+| PATCH | `/api/v1/todos` | Update a todo: done/open, urgency, due date, assignee, milestone, title, description. |
 | GET | `/api/v1/measurables` | List scorecard measurables, optionally with recent values inline. |
 | PUT | `/api/v1/measurables` | Upsert (or delete) a weekly/monthly value. |
 | GET | `/api/v1/vto` | Get the singleton V/TO (vision + traction + SWOT). |
@@ -75,6 +78,7 @@ Returns `{ "id": "…" }`. `team_id` and `team_name` are mutually exclusive.
   "assignee_email": "alice@gye.org",
   "team_id": "…",
   "team_name": "Finance",
+  "milestone_id": "… (optional; project teams)",
   "due_date": "2026-04-20",
   "is_urgent": false
 }
@@ -85,10 +89,59 @@ Returns `{ "id": "…" }`. New todos start in `open` status. `team_id` / `team_n
 **`PATCH /api/v1/todos`**
 
 ```json
-{ "id": "…", "done": true }
+{ "id": "…", "done": true, "milestone_id": "…", "due_date": "2026-09-22", "assignee_email": "alice@gye.org", "title": "…", "description": "…" }
 ```
 
-`done` defaults to `true`.
+Every field except `id` is optional. Pass `null` or `""` for `milestone_id`, `due_date` or `assignee_email` to clear it.
+
+### Project teams and milestones
+
+A team with `kind = project` runs as a project rather than an EOS team: its Rocks page becomes a Milestones page, milestones stand alone (no parent rock), and to-dos and issues can hang off a milestone. Seed a project plan by creating one milestone per phase, then to-dos with `milestone_id`.
+
+**`GET /api/v1/milestones?team_name=2026%20High%20Holidays`**
+
+```json
+{
+  "milestones": [
+    {
+      "id": "…",
+      "title": "Before launch",
+      "status": "on_track",
+      "due_date": "2026-09-10",
+      "rock_id": null,
+      "team": { "id": "…", "name": "2026 High Holidays" },
+      "owner": { "id": "…", "name": "…", "email": "…" },
+      "todo_counts": { "open": 12, "total": 15 }
+    }
+  ],
+  "count": 1
+}
+```
+
+**`POST /api/v1/milestones`**
+
+```json
+{
+  "title": "string (required)",
+  "team_id": "…",
+  "team_name": "2026 High Holidays",
+  "description": "string (optional)",
+  "owner_email": "alice@gye.org",
+  "due_date": "2026-09-10",
+  "status": "on_track | off_track | done (default on_track)",
+  "rock_id": "… (optional; only for milestones under a rock)"
+}
+```
+
+Returns `{ "id": "…" }`.
+
+**`PATCH /api/v1/milestones`**
+
+```json
+{ "id": "…", "title": "…", "description": "…", "owner_email": "…", "due_date": "…", "status": "done", "is_archived": false }
+```
+
+Every field except `id` is optional.
 
 ### Measurables (scorecard)
 

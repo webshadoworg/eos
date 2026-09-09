@@ -4,10 +4,14 @@ import StatusCheckbox from '~/components/StatusCheckbox.svelte';
 import RichTextEditor from '~/components/RichTextEditor.svelte';
 import { Mountain, Flag, Plus, X, Trash2, Calendar, CalendarRange, User, Archive } from 'lucide-svelte';
 import { supabase } from '~/lib/supabase';
+import { isProjectTeam } from '~/lib/team';
 
 const url = Astro.url;
 const team = Astro.locals.currentTeam;
 const allowedTeams = Astro.locals.allowedTeams;
+// Project teams: this page is the Milestones page. Rocks are hidden, and
+// milestones stand alone (no parent rock).
+const isProject = isProjectTeam(team);
 
 const addingRock = url.searchParams.get('add_rock') === '1';
 const addingMilestone = url.searchParams.get('add_milestone') === '1';
@@ -16,7 +20,7 @@ const editMilestoneId = url.searchParams.get('milestone');
 const managingQuarters = url.searchParams.get('quarters') === '1';
 
 const sortRocks = url.searchParams.get('sort_rocks') ?? 'due_date';
-const sortMilestones = url.searchParams.get('sort_milestones') ?? 'priority';
+const sortMilestones = url.searchParams.get('sort_milestones') ?? (isProject ? 'due_date' : 'priority');
 
 // Rocks are org-wide.
 let rockQuery = supabase
@@ -40,19 +44,33 @@ let milestoneQuery = supabase
   `)
   .eq('is_archived', false);
 // Include teamless milestones so they stay reachable after creation.
-if (team) milestoneQuery = milestoneQuery.or(`team_id.eq.${team.id},team_id.is.null`);
+// Project teams only see their own.
+if (team && isProject) milestoneQuery = milestoneQuery.eq('team_id', team.id);
+else if (team) milestoneQuery = milestoneQuery.or(`team_id.eq.${team.id},team_id.is.null`);
 else milestoneQuery = milestoneQuery.is('team_id', null);
 
 if (sortMilestones === 'due_date') milestoneQuery = milestoneQuery.order('due_date', { ascending: true, nullsFirst: false });
 else if (sortMilestones === 'status') milestoneQuery = milestoneQuery.order('status');
 else milestoneQuery = milestoneQuery.order('priority_order', { ascending: true });
 
-const [{ data: rocks }, { data: milestones }, { data: employees }, { data: quarters }] = await Promise.all([
+const [{ data: rocks }, { data: milestones }, { data: employees }, { data: quarters }, { data: todoRows }] = await Promise.all([
   rockQuery,
   milestoneQuery,
   supabase.from('employees').select('id, full_name').order('full_name'),
   supabase.from('quarters').select('id, label, description, start_date, end_date').order('start_date', { ascending: false }),
+  isProject && team
+    ? supabase.from('todos').select('milestone_id, status').eq('team_id', team.id).neq('status', 'archived').not('milestone_id', 'is', null)
+    : Promise.resolve({ data: [] as any[] }),
 ]);
+
+// Per-milestone to-do counts (project teams).
+const todoCounts = new Map<string, { open: number; total: number }>();
+for (const t of todoRows ?? []) {
+  const c = todoCounts.get(t.milestone_id) ?? { open: 0, total: 0 };
+  c.total += 1;
+  if (t.status === 'open') c.open += 1;
+  todoCounts.set(t.milestone_id, c);
+}
 
 // Current quarter = the one containing today; fallback to the most recent.
 const today = new Date().toISOString().slice(0, 10);
@@ -113,51 +131,57 @@ const statusLabel = { on_track: 'On Track', off_track: 'Off Track', done: 'Done'
 
 const back = '/rocks';
 ---
-<AppLayout title="Rocks · GYE EOS">
+<AppLayout title={isProject ? 'Milestones · GYE EOS' : 'Rocks · GYE EOS'}>
   <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
     <div class="flex items-center gap-3">
       <div class="w-12 h-12 rounded-xl bg-violet-100 grid place-items-center">
         <Mountain class="text-violet-600" size={24} />
       </div>
       <div>
-        <h1 class="text-2xl font-semibold text-stone-900">Rocks</h1>
-        <p class="text-stone-500 text-sm">Quarterly priorities for the organization</p>
+        <h1 class="text-2xl font-semibold text-stone-900">{isProject ? 'Milestones' : 'Rocks'}</h1>
+        <p class="text-stone-500 text-sm">{isProject ? `${team?.name} · the phases of the project, each with its to-dos` : 'Quarterly priorities for the organization'}</p>
       </div>
     </div>
     <div class="flex items-center gap-2">
-      <a
-        href="/rocks?quarters=1"
-        class="border border-stone-300 bg-white hover:bg-stone-50 rounded-xl px-4 py-2 text-sm font-medium flex items-center gap-1.5 text-stone-700"
-      >
-        <CalendarRange size={15} />
-        Quarters
-      </a>
+      {!isProject && (
+        <a
+          href="/rocks?quarters=1"
+          class="border border-stone-300 bg-white hover:bg-stone-50 rounded-xl px-4 py-2 text-sm font-medium flex items-center gap-1.5 text-stone-700"
+        >
+          <CalendarRange size={15} />
+          Quarters
+        </a>
+      )}
       <a
         href="/rocks?add_milestone=1"
-        class="border border-stone-300 bg-white hover:bg-stone-50 rounded-xl px-4 py-2 text-sm font-medium flex items-center gap-1.5 text-stone-700"
+        class={isProject
+          ? 'bg-stone-800 hover:bg-stone-900 text-white rounded-xl px-4 py-2 text-sm font-medium flex items-center gap-1.5'
+          : 'border border-stone-300 bg-white hover:bg-stone-50 rounded-xl px-4 py-2 text-sm font-medium flex items-center gap-1.5 text-stone-700'}
       >
         <Plus size={15} />
         Add Milestone
       </a>
-      <a
-        href="/rocks?add_rock=1"
-        class="bg-stone-800 hover:bg-stone-900 text-white rounded-xl px-4 py-2 text-sm font-medium flex items-center gap-1.5"
-      >
-        <Plus size={15} />
-        Add Rock
-      </a>
+      {!isProject && (
+        <a
+          href="/rocks?add_rock=1"
+          class="bg-stone-800 hover:bg-stone-900 text-white rounded-xl px-4 py-2 text-sm font-medium flex items-center gap-1.5"
+        >
+          <Plus size={15} />
+          Add Rock
+        </a>
+      )}
     </div>
   </header>
 
   <!-- ============================================================
        MILESTONES (for current team)
        ============================================================ -->
-  <section class="mb-10">
+  <section class={isProject ? '' : 'mb-10'}>
     <div class="flex items-center justify-between mb-4">
       <h2 class="text-lg font-semibold text-stone-900 flex items-center gap-2">
         <Flag size={18} class="text-amber-500" />
-        Milestones
-        {team && <span class="text-sm text-stone-400 font-normal">— {team.name}</span>}
+        {isProject ? 'All milestones' : 'Milestones'}
+        {team && !isProject && <span class="text-sm text-stone-400 font-normal">— {team.name}</span>}
       </h2>
       <form method="GET" class="flex gap-2">
         {sortRocks !== 'due_date' && <input type="hidden" name="sort_rocks" value={sortRocks} />}
@@ -189,6 +213,14 @@ const back = '/rocks';
                 )}
               </div>
             </a>
+            {isProject && (() => {
+              const c = todoCounts.get(m.id);
+              return (
+                <a href={`/todos?milestone=${m.id}`} class="shrink-0 text-xs font-medium rounded-full border px-2.5 py-1 hover:bg-stone-50 border-stone-200 text-stone-600" title="Open this milestone's to-dos">
+                  {c ? <>{c.open} open · {c.total} to-dos</> : 'No to-dos yet'}
+                </a>
+              );
+            })()}
           </div>
         ))
       ) : (
@@ -200,9 +232,9 @@ const back = '/rocks';
   </section>
 
   <!-- ============================================================
-       ROCKS (org-wide)
+       ROCKS (org-wide) — hidden for project teams
        ============================================================ -->
-  <section>
+  {!isProject && <section>
     <div class="flex items-center justify-between mb-4">
       <h2 class="text-lg font-semibold text-stone-900">GYE Rocks</h2>
       <form method="GET" class="flex gap-2">
@@ -269,7 +301,7 @@ const back = '/rocks';
         </div>
       )}
     </div>
-  </section>
+  </section>}
 
   <!-- ============================================================
        ROCK edit/add slide-over
@@ -424,13 +456,15 @@ const back = '/rocks';
               </div>
             </div>
 
-            <div>
-              <label class="text-sm font-medium text-stone-700">Parent rock</label>
-              <select name="rock_id" required class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm">
-                <option value="">Select a rock...</option>
-                {rocks?.map((r) => <option value={r.id} selected={r.id === loadedMilestone?.rock_id}>{r.title}</option>)}
-              </select>
-            </div>
+            {!isProject && (
+              <div>
+                <label class="text-sm font-medium text-stone-700">Parent rock</label>
+                <select name="rock_id" required class="mt-1 w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm">
+                  <option value="">Select a rock...</option>
+                  {rocks?.map((r) => <option value={r.id} selected={r.id === loadedMilestone?.rock_id}>{r.title}</option>)}
+                </select>
+              </div>
+            )}
 
             <div>
               <label class="text-sm font-medium text-stone-700">Team</label>

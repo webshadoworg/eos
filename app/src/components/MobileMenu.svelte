@@ -12,6 +12,7 @@
     userName,
     backPath,
     canSeeExpenses = false,
+    rocksLabel = 'Rocks',
   } = $props<{
     teams: Team[];
     currentTeamId: string | null;
@@ -19,6 +20,7 @@
     userName: string;
     backPath: string;
     canSeeExpenses?: boolean;
+    rocksLabel?: string;
   }>();
 
   let open = $state(false);
@@ -38,15 +40,15 @@
     }
   });
 
-  const primary = [
+  const primary = $derived([
     { href: '/',          label: 'Home',          icon: Target,      match: (p: string) => p === '/' },
     { href: '/vto',       label: 'V/TO',          icon: Eye,         match: (p: string) => p.startsWith('/vto') },
-    { href: '/rocks',     label: 'Rocks',         icon: Target,      match: (p: string) => p.startsWith('/rocks') },
+    { href: '/rocks',     label: rocksLabel,      icon: Target,      match: (p: string) => p.startsWith('/rocks') },
     { href: '/issues',    label: 'Issues',        icon: AlertCircle, match: (p: string) => p.startsWith('/issues') },
     { href: '/todos',     label: 'To-Dos',        icon: ListTodo,    match: (p: string) => p.startsWith('/todos') },
     { href: '/scorecard', label: 'Scorecard',     icon: ChartBar,    match: (p: string) => p.startsWith('/scorecard') },
     { href: '/focus',     label: 'Current Focus', icon: Focus,       match: (p: string) => p.startsWith('/focus') },
-  ];
+  ]);
 
   const allSecondary = [
     { href: '/chart',          label: 'Org Chart',             icon: Network,     always: true },

@@ -23,6 +23,8 @@ export const GET: APIRoute = async ({ request, url }) => {
 
   const assigneeEmail = url.searchParams.get('assignee');
   const teamId = url.searchParams.get('team_id');
+  const teamName = url.searchParams.get('team_name');
+  const milestoneId = url.searchParams.get('milestone_id');
   const status = url.searchParams.get('status') ?? 'open';
 
   let assigneeId: string | null = null;
@@ -31,16 +33,21 @@ export const GET: APIRoute = async ({ request, url }) => {
     if (!assigneeId) return json({ todos: [], count: 0, note: `no employee with email '${assigneeEmail}'` });
   }
 
+  const resolvedTeamId = await resolveTeam(teamId, teamName);
+  if ((teamId || teamName) && !resolvedTeamId) return json({ todos: [], count: 0, note: 'team not found' });
+
   let q = supabase
     .from('todos')
     .select(`
       id, title, description, status, is_urgent, due_date, created_at, updated_at,
       team:teams(id, name),
-      assignee:employees!todos_assignee_employee_id_fkey(id, full_name, email)
+      assignee:employees!todos_assignee_employee_id_fkey(id, full_name, email),
+      milestone:milestones(id, title, due_date, status)
     `)
     .order('due_date', { ascending: true, nullsFirst: false });
   if (assigneeId) q = q.eq('assignee_employee_id', assigneeId);
-  if (teamId) q = q.eq('team_id', teamId);
+  if (resolvedTeamId) q = q.eq('team_id', resolvedTeamId);
+  if (milestoneId) q = q.eq('milestone_id', milestoneId);
   if (status !== 'all') q = q.eq('status', status);
 
   const { data, error } = await q;
@@ -57,6 +64,7 @@ export const GET: APIRoute = async ({ request, url }) => {
     updated_at: t.updated_at,
     team: t.team ? { id: t.team.id, name: t.team.name } : null,
     assignee: t.assignee ? { id: t.assignee.id, name: t.assignee.full_name, email: t.assignee.email } : null,
+    milestone: t.milestone ? { id: t.milestone.id, title: t.milestone.title, due_date: t.milestone.due_date, status: t.milestone.status } : null,
   }));
 
   return json({ todos, count: todos.length });
@@ -65,7 +73,7 @@ export const GET: APIRoute = async ({ request, url }) => {
 // ============================================================
 // POST /api/v1/todos — create a new todo
 // body: { title (required), description?, assignee_email?, team_id? or team_name?,
-//         due_date? (YYYY-MM-DD), is_urgent? (bool) }
+//         due_date? (YYYY-MM-DD), is_urgent? (bool), milestone_id? }
 // ============================================================
 export const POST: APIRoute = async ({ request }) => {
   const unauth = requireApiKey(request);
@@ -99,6 +107,7 @@ export const POST: APIRoute = async ({ request }) => {
       description: body.description ? String(body.description) : null,
       assignee_employee_id: assigneeId,
       team_id: teamId,
+      milestone_id: body.milestone_id ? String(body.milestone_id) : null,
       due_date: body.due_date ? String(body.due_date) : (() => {
         const d = new Date();
         d.setDate(d.getDate() + 7);
@@ -116,7 +125,7 @@ export const POST: APIRoute = async ({ request }) => {
 
 // ============================================================
 // PATCH /api/v1/todos — update a todo
-// body: { id (required), done?, is_urgent?, due_date?, assignee_email? }
+// body: { id (required), done?, is_urgent?, due_date?, assignee_email?, milestone_id?, title?, description? }
 //   - done: toggles status between 'open' and 'done'
 //   - assignee_email: pass null/empty string to unassign
 //   - due_date: YYYY-MM-DD, or null/empty string to clear
@@ -142,6 +151,11 @@ export const PATCH: APIRoute = async ({ request }) => {
   if (body.due_date !== undefined) {
     patch.due_date = body.due_date ? String(body.due_date) : null;
   }
+  if (body.milestone_id !== undefined) {
+    patch.milestone_id = body.milestone_id ? String(body.milestone_id) : null;
+  }
+  if (typeof body.title === 'string' && body.title.trim()) patch.title = body.title.trim();
+  if (body.description !== undefined) patch.description = body.description ? String(body.description) : null;
   if (body.assignee_email !== undefined) {
     if (!body.assignee_email) {
       patch.assignee_employee_id = null;

@@ -11,11 +11,12 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
     const name = String(form.get('name') ?? '').trim();
     if (!name) return redirect(back);
     const description = String(form.get('description') ?? '') || null;
+    const kind = form.get('kind') === 'project' ? 'project' : 'standard';
 
     // Insert team + creating employee as admin member in one go.
     const { data: team, error } = await supabase
       .from('teams')
-      .insert({ name, description })
+      .insert({ name, description, kind })
       .select('id')
       .single();
     if (error) return new Response(`Error: ${error.message}`, { status: 500 });
@@ -39,6 +40,7 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
       .update({
         name: String(form.get('name') ?? '').trim(),
         description: String(form.get('description') ?? '') || null,
+        kind: form.get('kind') === 'project' ? 'project' : 'standard',
       })
       .eq('id', id);
     if (error) return new Response(`Error: ${error.message}`, { status: 500 });
