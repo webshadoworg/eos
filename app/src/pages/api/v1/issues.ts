@@ -22,7 +22,9 @@ export const GET: APIRoute = async ({ request, url }) => {
   if (unauth) return unauth;
 
   const ownerEmail = url.searchParams.get('assignee') ?? url.searchParams.get('owner');
-  const teamId = url.searchParams.get('team_id');
+  const teamId = await resolveTeam(url.searchParams.get('team_id'), url.searchParams.get('team_name'));
+  if ((url.searchParams.get('team_id') || url.searchParams.get('team_name')) && !teamId) return json({ issues: [], count: 0, note: 'team not found' });
+  const milestoneId = url.searchParams.get('milestone_id');
   const status = url.searchParams.get('status') ?? 'open';
   const term = url.searchParams.get('term');
 
@@ -37,11 +39,13 @@ export const GET: APIRoute = async ({ request, url }) => {
     .select(`
       id, title, description, status, priority, priority_order, type, term_type, created_at, updated_at,
       team:teams(id, name),
-      owner:employees!issues_owner_employee_id_fkey(id, full_name, email)
+      owner:employees!issues_owner_employee_id_fkey(id, full_name, email),
+      milestone:milestones(id, title)
     `)
     .order('priority_order');
   if (ownerId) q = q.eq('owner_employee_id', ownerId);
   if (teamId) q = q.eq('team_id', teamId);
+  if (milestoneId) q = q.eq('milestone_id', milestoneId);
   if (status !== 'all') q = q.eq('status', status);
   if (term) q = q.eq('term_type', term);
 
@@ -61,6 +65,7 @@ export const GET: APIRoute = async ({ request, url }) => {
     updated_at: i.updated_at,
     team: i.team ? { id: i.team.id, name: i.team.name } : null,
     owner: i.owner ? { id: i.owner.id, name: i.owner.full_name, email: i.owner.email } : null,
+    milestone: i.milestone ? { id: i.milestone.id, title: i.milestone.title } : null,
   }));
 
   return json({ issues, count: issues.length });
@@ -130,6 +135,7 @@ export const POST: APIRoute = async ({ request }) => {
       description: body.description ? String(body.description) : null,
       owner_employee_id: ownerId,
       team_id: teamId,
+      milestone_id: body.milestone_id ? String(body.milestone_id) : null,
       term_type: termType,
       type,
       priority: priority ?? 3,
@@ -144,8 +150,9 @@ export const POST: APIRoute = async ({ request }) => {
 
 // ============================================================
 // PATCH /api/v1/issues — mark an issue solved
-// body: { id (required), solved?: boolean (default true) }
-// Only toggles status between 'open' and 'solved'. No other mutations.
+// body: { id (required), solved?: boolean (default true), milestone_id? }
+//   - solved toggles status between 'open' and 'solved'
+//   - milestone_id: set or clear (null / "") the milestone
 // ============================================================
 export const PATCH: APIRoute = async ({ request }) => {
   const unauth = requireApiKey(request);
@@ -156,10 +163,13 @@ export const PATCH: APIRoute = async ({ request }) => {
 
   const id = body?.id ? String(body.id) : '';
   if (!id) return json({ error: 'id is required' }, 400);
-  const solved = body.solved === undefined ? true : Boolean(body.solved);
-  const status = solved ? 'solved' : 'open';
+  const patch: Record<string, unknown> = {};
+  if (body.solved !== undefined || body.milestone_id === undefined) {
+    patch.status = (body.solved === undefined ? true : Boolean(body.solved)) ? 'solved' : 'open';
+  }
+  if (body.milestone_id !== undefined) patch.milestone_id = body.milestone_id ? String(body.milestone_id) : null;
 
-  const { error } = await supabase.from('issues').update({ status }).eq('id', id);
+  const { error } = await supabase.from('issues').update(patch).eq('id', id);
   if (error) return json({ error: error.message }, 500);
-  return json({ id, status });
+  return json({ id, ...patch });
 };

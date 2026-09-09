@@ -32,9 +32,9 @@ Valid keys come from the `API_KEYS` environment variable on the server — a com
 | GET | `/api/v1/milestones` | Optional `?team_id=` / `?team_name=`, `?include_archived=1`. Each carries `todo_counts`. |
 | POST | `/api/v1/milestones` | Create a milestone (standalone under a project team, or under a rock). |
 | PATCH | `/api/v1/milestones` | Update title, description, owner, due date, status, archive flag. |
-| GET | `/api/v1/issues` | Optional `?assignee=<email>`, `?team_id=`, `?status=`, `?term=short_term\|long_term`. |
-| POST | `/api/v1/issues` | Create an issue. |
-| PATCH | `/api/v1/issues` | Mark an issue solved/open. |
+| GET | `/api/v1/issues` | Optional `?assignee=<email>`, `?team_id=` / `?team_name=`, `?milestone_id=`, `?status=`, `?term=short_term\|long_term`. |
+| POST | `/api/v1/issues` | Create an issue, optionally under a milestone. |
+| PATCH | `/api/v1/issues` | Mark an issue solved/open, or set its milestone. |
 | GET | `/api/v1/todos` | Optional `?assignee=<email>`, `?team_id=` / `?team_name=`, `?milestone_id=`, `?status=open\|done\|archived\|all` (default `open`). |
 | POST | `/api/v1/todos` | Create a todo, optionally under a milestone. |
 | PATCH | `/api/v1/todos` | Update a todo: done/open, urgency, due date, assignee, milestone, title, description. |
@@ -53,6 +53,7 @@ Valid keys come from the `API_KEYS` environment variable on the server — a com
   "owner_email": "alice@gye.org",
   "team_id": "…",
   "team_name": "Finance",
+  "milestone_id": "… (optional; project teams)",
   "term_type": "short_term | long_term (default short_term)",
   "type": "string (optional)",
   "priority": 1
@@ -64,10 +65,10 @@ Returns `{ "id": "…" }`. `team_id` and `team_name` are mutually exclusive.
 **`PATCH /api/v1/issues`**
 
 ```json
-{ "id": "…", "solved": true }
+{ "id": "…", "solved": true, "milestone_id": "…" }
 ```
 
-`solved` defaults to `true` if omitted.
+`solved` defaults to `true` if omitted, unless only `milestone_id` is sent. Pass `null` or `""` for `milestone_id` to clear it.
 
 **`POST /api/v1/todos`**
 
@@ -98,7 +99,7 @@ Every field except `id` is optional. Pass `null` or `""` for `milestone_id`, `du
 
 A team with `kind = project` runs as a project rather than an EOS team: its Rocks page becomes a Milestones page, milestones stand alone (no parent rock), and to-dos and issues can hang off a milestone. Seed a project plan by creating one milestone per phase, then to-dos with `milestone_id`.
 
-**`GET /api/v1/milestones?team_name=2026%20High%20Holidays`**
+**`GET /api/v1/milestones?team_name=2026%20High%20Holidays%205787`**
 
 ```json
 {
@@ -109,7 +110,7 @@ A team with `kind = project` runs as a project rather than an EOS team: its Rock
       "status": "on_track",
       "due_date": "2026-09-10",
       "rock_id": null,
-      "team": { "id": "…", "name": "2026 High Holidays" },
+      "team": { "id": "…", "name": "2026 High Holidays 5787" },
       "owner": { "id": "…", "name": "…", "email": "…" },
       "todo_counts": { "open": 12, "total": 15 }
     }
@@ -124,7 +125,7 @@ A team with `kind = project` runs as a project rather than an EOS team: its Rock
 {
   "title": "string (required)",
   "team_id": "…",
-  "team_name": "2026 High Holidays",
+  "team_name": "2026 High Holidays 5787",
   "description": "string (optional)",
   "owner_email": "alice@gye.org",
   "due_date": "2026-09-10",
