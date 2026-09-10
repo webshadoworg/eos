@@ -1,7 +1,7 @@
 ---
 import AppLayout from '~/layouts/AppLayout.astro';
 import VtoEditor from '~/components/VtoEditor.svelte';
-import { Eye, Pencil, Check } from 'lucide-svelte';
+import { Eye, Pencil, Check, Download } from 'lucide-svelte';
 import { supabase } from '~/lib/supabase';
 import { canEditVto } from '~/lib/permissions';
 
@@ -34,6 +34,16 @@ const swot = vto?.swot ?? {};
         </p>
       </div>
     </div>
+    <div class="flex items-center gap-2">
+      <a
+        href="/vto.md"
+        download
+        class="border border-stone-300 bg-white hover:bg-stone-50 text-stone-700 rounded-xl px-5 py-2.5 text-sm font-medium flex items-center gap-1.5"
+        title="Download the V/TO as a Markdown file"
+      >
+        <Download size={16} />
+        Download
+      </a>
     {canEdit && (
       editMode ? (
         <a
@@ -53,6 +63,7 @@ const swot = vto?.swot ?? {};
         </a>
       )
     )}
+    </div>
   </header>
 
   <VtoEditor
